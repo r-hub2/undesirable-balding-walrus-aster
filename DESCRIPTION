@@ -29,6 +29,8 @@ Description: Aster models (Geyer, Wagenius, and Shaw, 2007,
 License: MIT + file LICENSE
 URL: https://www.stat.umn.edu/geyer/aster/
 NeedsCompilation: yes
-Packaged: 2025-05-20 12:43:11 UTC; geyer
+Packaged: 2025-06-02 17:19:11 UTC; geyer
 Author: Charles J. Geyer [aut, cre]
 Maintainer: Charles J. Geyer <geyer@umn.edu>
+Repository: CRAN
+Date/Publication: 2025-05-23 20:52:01 UTC
