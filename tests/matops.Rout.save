@@ -1,0 +1,82 @@
+
+R Under development (unstable) (2017-03-08 r72321) -- "Unsuffered Consequences"
+Copyright (C) 2017 The R Foundation for Statistical Computing
+Platform: x86_64-pc-linux-gnu (64-bit)
+
+R is free software and comes with ABSOLUTELY NO WARRANTY.
+You are welcome to redistribute it under certain conditions.
+Type 'license()' or 'licence()' for distribution details.
+
+R is a collaborative project with many contributors.
+Type 'contributors()' for more information and
+'citation()' on how to cite R or R packages in publications.
+
+Type 'demo()' for some demos, 'help()' for on-line help, or
+'help.start()' for an HTML browser interface to help.
+Type 'q()' to quit R.
+
+> 
+>  library(aster)
+Loading required package: trust
+> 
+>  set.seed(42)
+> 
+>  m <- 10
+>  n <- 5
+>  a <- matrix(rnorm(m * n), nrow = m)
+>  b <- rnorm(n)
+> 
+>  out <- .C(aster:::C_aster_mat_vec_mult,
++      nrow = as.integer(m),
++      ncol = as.integer(n),
++      a = as.double(a),
++      b = as.double(b),
++      c = double(m))
+> 
+>  all.equal(out$c, as.numeric(a %*% b))
+[1] TRUE
+> 
+>  ##########
+> 
+>  b <- rnorm(m)
+> 
+>  out <- .C(aster:::C_aster_vec_mat_mult,
++      nrow = as.integer(m),
++      ncol = as.integer(n),
++      a = as.double(a),
++      b = as.double(b),
++      c = double(n))
+> 
+>  all.equal(out$c, as.numeric(b %*% a))
+[1] TRUE
+> 
+>  ##########
+> 
+>  out <- .C(aster:::C_aster_mat_vec_mat_mult,
++      nrow = as.integer(m),
++      ncol = as.integer(n),
++      a = as.double(a),
++      b = as.double(b),
++      c = matrix(as.double(0), n, n))
+> 
+>  all.equal(out$c, t(a) %*% diag(b) %*% a)
+[1] TRUE
+> 
+>  ##########
+> 
+>  b <- matrix(rnorm(n * n), n)
+> 
+>  out <- .C(aster:::C_aster_diag_mat_mat_mat_mult,
++      nrow = as.integer(m),
++      ncol = as.integer(n),
++      a = as.double(a),
++      b = as.double(b),
++      c = double(m))
+> 
+>  all.equal(out$c, diag(a %*% b %*% t(a)))
+[1] TRUE
+> 
+> 
+> proc.time()
+   user  system elapsed 
+  0.128   0.020   0.143 

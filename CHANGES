@@ -1,0 +1,255 @@
+ 0.2    first version to CRAN
+ 0.2-1  fixed bugs in docs found by scripts on CRAN (R-devel check)
+ 0.3    added data/echinacea.txt
+              man/echinacea.Rd
+              test/tutor.R
+        added test in aster.R
+        added package vignette
+        added examples on all help pages to be used by users
+ 0.3-1  changed variable "site" to "pop" in echinacea.txt
+        corresponding changes in many other files
+        \usepackage[utf8]{inputenc} in tutor.Rnw
+        many small changes in wording in tutor.Rnw
+ 0.4    made trust the default optimizer
+ 0.4-1  removed the timing.pdf vignette, fixed xrefs to trust in Rd files
+ 0.4-2  added import(trust) to NAMESPACE
+ 0.5    added 4-th family "two.trunc.poisson"
+        actually implemented code for k-truncated Poisson
+        put document describing k-truncated Poisson in inst/doc
+        new R function rktp that simulates k-truncated Poisson
+        cannot implement k-truncated Poisson for arbitrary family
+              until families get (non-exponential family) parameters,
+              such as k for k-truncated Poisson, r for negative binomial,
+              offset for Poisson, n for binomial(n, p), sigma for
+              normal-location.  All of that goes on the to-do list,
+              along with multivariate families (as per revised version of
+              the paper), especially multinomial and normal-location-scale.
+        fixed (?!) or at least worked around nasty validation bug in
+              predict.aster
+ 0.5-1  fixed bug in tests/tutor.R caused by bug fix in R.  optim was ignoring
+            its maxit argument when method == "CG".  When it stopped ignoring
+            it, it failed to converge, because it takes more than 1000
+            iterations.
+ 0.5-2  fixed bug in inst/doc/trunc.Rnw -- must be vignette to pass R CMD check
+ 0.6    new superfamily system: exponential families with non-exponential
+            family hyperparameters
+        canonical affine models
+ 0.6-1  negative binomial distribution
+ 0.6-2  truncated negative binomial distribution
+        fixed bug in 0.6 and 0.6-1 that made them useless with models
+            that did not have unrestricted canonical parameter space:
+            mlogl could return NaN rather than Inf (which is what it
+            is supposed to do) when evaluating at point outside the
+            canonical space.  Now hopefully fixed with new code
+            in astunco.c and astcond.c.  (TODO: need more tests with
+            restricted parameter space.  foobar.R is not enough.  Note
+            0.6 and 0.6-1 were not made public, so no one bug CJG saw
+            this bug.  Still it does show the tests directory is deficient.)
+ 0.7    added normal-location families; see ?fam.normal.location
+ 0.7-1  fixed incorrect signature in as.character.astfam
+ 0.7-2  new data sets: echin2 chamae2 chamae aphid
+        added warning (varb must be factor) to vignette
+ 0.7-3  unmatched braces in .Rd files chamae2 chamae
+ 0.7-4  fixed bug in predict.aster.formula documentation.
+            amat is three-way array just as for predict.aster
+            example already required this.
+        removed tests/tutor.R   took too long and tested nothing specific
+ 0.7-5  added newcoef argument to predict.aster and predict.aster.formula
+ 0.7-6  fix doc bug found by Rd version 2 parser
+ 0.7-7  add sim.rda dataset for TR 669 and 674  Also add references to aster.Rd
+ 0.8    add radish.rda and oats.rda datasets and pseudo function for TR 676.
+            Also fixed other references removing TeX ~.  Also fixed
+            "make clean" in inst/doc Makefile.
+ 0.8-1  added pickle, penmlogl, and transform functions and put on
+            github in private repo
+ 0.8-2  change name of transform to astertransform to avoid conflict with
+            package:base
+ 0.8-3  mods to pickle for pseudo-REML (an idea later abandoned).  Also ...
+            arg added to pickle.
+ 0.8-4  revised pickle to return Inf rather than error when negative
+            variance comp
+        added tol argument to pickle, deleted tol argument from penmlogl
+            Now pickle works with optim method "Nelder-Mead"
+        added type argument to pickle
+        added cache argument to pickle (but this was later revised)
+        renamed type argument of pickle to rescale
+        added tests/penmlogl.R
+ 0.8-5  changes in 0.8-4 now working
+        cache argument removed from penmlogl
+        revisions to pickle (penmlogl called by do.call)
+        more revisions to pickle determinant calculated as product of
+            eigenvalues using log1p for accuracy
+        tests/pickle.R added (penmlogl and pickle functions now have
+            full tests)
+ 0.8-6  bug found by Frank Shaw fixed.  pickle was using global variable nfix
+            bug fixed and tested (no global variables now used)
+ 0.8-7  deleted COPYING file as per instructions from R CMD check
+        added cache argument to pickle (this version now works)
+        tests/cache.R added to test that caching actually works
+ 0.8-8  revise oats dataset for new analysis
+        delete R/pseudo.R man/pseudo.Rd tests/pseudo.R tests/pseudo.Rout.save
+        (pseudo idea is now gone)
+
+ 0.8-9  deleted fterm = 0 from argument of trust call inside
+        pickle.  If users want that behavior, they can specify
+        fterm = 0 as argument to optim, which will be pased to pickle.
+        And do we really need such finickiness to be the default?
+
+ 0.8-10 Add function reaster to hide pickle and penmlogl from ordinary users
+        add function penmlogl2 (not exported) for evaluation of hessian
+
+ 0.8-11 add functions pickle1, pickle2, and pickle3 to do reaster (not for
+        naive users), called by reaster.  Add function summary.reaster.
+ 
+ 0.8-12 add functions quickle and newpickle (the latter not used).  Rewrite
+        reaster to use original (not square root) parameterization for
+        variance components in computing standard errors.  Totally rewrite
+        design doc (re.pdf) to reflect such.
+
+ 0.8-13 skipped in honor of Stevie Wonder
+
+ 0.8-14 changed examples in aster, predict.aster, anova.aster docs
+
+ 0.8-15 use paste0 in R functions
+        added chamae3 dataset
+        fixed names of components of result of reaster
+        fixed bug in penmlogl2 (scale component of result wrong length)
+
+ 0.8-16 no DON'T use paste0 in R functions (that requires R-2.15.0)
+        changed behavior of reaster.summary when calculated Fisher information
+            matrix is not positive definite.  Now not an error but all std.
+            err. set to Inf
+        fixed test penmlogl.R to correspond to bugfix in previous version
+
+ 0.8-17 changed some | to || in reaster.R
+        fixed many, many errors [ without drop = FALSE
+        fixed several errors diag(x) when x could be length 1
+        added tests/reaster1.R to test just one variance component
+        added options(digits=4) to several tests in hope of fewer differences
+
+ 0.8-18 
+
+ 0.8-19 added tech rept ref to reaster.Rd
+
+ 0.8-20 added options(na.action = na.fail) to aster and reaster
+
+ 0.8-21 changed license to "MIT + file LICENSE" as per CRAN instructions
+
+ 0.8-22 bug fix.  summary.reaster crashed with inexplicable error message
+        when all variance component estimates were zero
+
+
+ 0.8-23 added \dontrun to some examples per instructions from Brian Ripley
+
+ 0.8-24 fixed bug in penmlogl2 (needed drop = FALSE) when only one random
+            effect
+        added deviance component to result of reaster function (can now
+            so some "anova" tests
+        made aster and reaster objects subclass of class "asterOrReaster"
+            so one "anova" function can do both and can compare models
+            with and without random effects
+
+ 0.8-25 fixed inst/doc/Makefile as per instructions from Uwe Ligges
+            and "Writing R Extensions"
+        No.  That does not work either.  Just removed Makefile
+
+ 0.8-26 added .Rbuildignore as per instructions from Brian Ripley
+
+ 0.8-27 moved vignettes to vignettes directory as per instructions from
+            Uwe Ligges
+
+ 0.8-28 bug fix in summary.reaster
+
+ 0.8-29 feature change to predict.aster: finally document gradient component
+            of output and add new argument "gradient" to request gradent
+            even when not computing standard errors
+
+ 0.8-30 removed test for convergence of Nelder-Mead step in reaster.default.
+            use whether or not converged.  We are going to polish anyway.
+            Only do stop if error.
+        put warning about negative binomial and random effects in
+            documentation for reaster and also warning in reaster function.
+
+ 0.8-31 explicit import from non-base packages, as required by R-3.3.0
+
+ 0.9    allow C functions that evaluate aster unconditional log likelihood
+        to be called from C code in other packages.
+
+        remove styles from C function registration.  Deprecated in R-3.3.3.
+
+        lots of changes to restrict visibility as per Sections 5.4 and 6.15
+        of Writing R Extensions
+
+ 0.9.1  Minor changes made by Brian D. Ripley to CRAN package.
+
+ 0.9.1.1  A bunch changes made by Brian D. Ripley to CRAN package, and
+          package is orphaned.
+
+ 1.0    package unorphaned.
+
+        lots of fixes to computer arithmetic for zero truncated poisson,
+        both bugs (returning NaN when can do better) and inaccuracies.
+
+        fixed check for data validity for k-truncated distributions
+        check was if (xpred == 0) x == 0 else x > k
+        check is  if (xpred == 0) x == 0 else x >= xpred * (k + 1)
+
+        new argument is.always.parameter added to aster method of
+        R generic function predict.  Computes conditional mean value
+        parameters using the correct definition.
+
+ 1.0-1  Changed http: to https: in cran URLs
+
+ 1.0-2  Added dontrun to help for asterOrReaster method of R generic
+        function anova (because CRAN computers are slow)
+
+ 1.0-3  Many changes to tests to make for no blather with R-3.6.0
+        mostly due to changes in R function sample in R core, but
+        also maybe partly to previous changes in 1.0 ???
+
+ 1.1    summary.aster no longer prints putative directions of recession
+        but rather returns such as dor attribute of error object
+
+        new dataset foobar has built-in directions of recession
+
+        R package trust now in Imports rather than Depends so not
+        in search path after library("aster")
+
+        Now requires R-3.6.0 to get R function base::errorCondition
+
+        Fixed bug in R function aster where using parm = aout$coefficients
+        where aout is result from previous invocation of R function aster
+        gives an error is aout$dropped is not NULL.  Before this fix the
+        user had to put in zeros for those dropped coefficients, but where?
+        A horrible guessing game.  Now we recognize coefficients based on
+        names(aout$coefficients).
+
+ 1.1-1  Fixed bug (?) in reaster to make it try harder to get fixed effect
+        fit (if at first you don't succeed, try, try again).
+
+ 1.1-2  Added deriv argument to penmlogl
+
+ 1.1-3   Fixed security bug complained about by clang.
+
+ 1.2    Added methods of R generic function vcov for objects of classes
+        aster and reaster
+
+ 1.2-1  Fixed bugs in vcov.reaster
+
+ 1.2-2  Fixed bug in non-exported function is.zero that does the test
+        for whether variance component is estimated to be exactly zero
+
+ 1.2-4  Fixed bug in vcov.reaster
+
+ 1.2-5  C language objective function for R function reaster
+
+ 1.3    New R function objfun, objective function for reaster problems
+
+        New implementation of vcov.reaster based on numerical differentiation
+            of R function objfun
+
+ 1.3-2  add argument accurate = FALSE to R function reaster (deleted later)
+
+ 1.3-3  first time objfun.factory really works
+
+ 1.3-4  first time vcov.reaster really works

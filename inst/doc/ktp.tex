@@ -1,0 +1,421 @@
+
+\documentclass[11pt]{article}
+
+\usepackage{amsmath}
+\usepackage{indentfirst}
+
+\DeclareMathOperator{\var}{var}
+\newcommand{\Prmu}{\Pr\nolimits_\mu}
+
+\begin{document}
+
+\title{The $K$-Truncated Poisson Distribution}
+\author{Charles J. Geyer}
+\maketitle
+
+\section{Introduction}
+
+This document works through the details of the $k$-truncated Poisson distribution,
+a special case of which is the zero-truncated Poisson distribution.  The $k$-truncated Poisson
+distribution is the distribution of a Poisson random variable $Y$ conditional on the event
+$Y > k$.  It has one parameter, which we may take to be $\mu = E(Y)$.
+Since $\mu$ is not the mean (or anything else simple) of the distribution of $Y$ conditioned
+on the even $Y > k$, we do not call $\mu$ the mean, rather we call it
+the \emph{original parameter}.
+
+If $f_\mu$ is the probability mass function (PMF) of $Y$, then the
+PMF $g_\mu$ of the $k$-truncated Poisson distribution is
+defined by
+\begin{equation} \label{eq:pmf-one}
+    g_\mu(x)
+    =
+    \frac{f_\mu(x)}{1 - \sum_{j = 0}^k f_\mu(j)},
+    \qquad x = k + 1, k + 2, \ldots
+\end{equation}
+Plugging in the formula for the Poisson PMF, we get
+\begin{equation} \label{eq:pmf-two}
+\begin{split}
+    g_\mu(x)
+    & =
+    \frac{\frac{\mu^x}{x !} e^{- \mu}}{1 - \sum_{j = 0}^k \frac{\mu^j}{j !} e^{- \mu}}
+    \\
+    & =
+    \frac{\mu^x}{x ! (e^\mu - \sum_{j = 0}^k \frac{\mu^j}{j !})}
+\end{split}
+\end{equation}
+
+\section{Exponential Family Properties}
+
+Clearly \eqref{eq:pmf-one} is the PMF of a one parameter exponential family having
+canonical statistic $x$ and canonical parameter $\theta = \log(\mu)$.
+Of course, the original parameter is $\mu = \exp(\theta)$.
+
+The cumulant function for the family is then
+\begin{equation} \label{eq:psi}
+    \psi(\theta)
+    =
+    \log \left(e^{e^\theta} - \sum_{j = 0}^k \frac{e^{j \theta}}{j !} \right)
+\end{equation}
+and has derivatives
+\begin{equation} \label{eq:tau}
+\begin{split}
+    \tau(\theta)
+    =
+    \psi'(\theta)
+    & =
+    \frac{ e^\theta \cdot e^{e^\theta}
+    - \sum_{j = 1}^k \frac{e^{j \theta}}{(j - 1) !} }
+    {e^{e^\theta} - \sum_{j = 0}^k \frac{e^{j \theta}}{j !}}
+    \\
+    & =
+    \frac{ \mu
+    - e^{- \mu} \sum_{j = 1}^k \frac{\mu^j}{(j - 1) !} }
+    {1 - e^{- \mu} \sum_{j = 0}^k \frac{\mu^j}{j !}}
+\end{split}
+\end{equation}
+and
+\begin{equation} \label{eq:psi-double-prime}
+\begin{split}
+    \psi''(\theta)
+    & =
+    \frac{ (e^\theta + e^{2 \theta}) \cdot e^{e^\theta}
+    - \sum_{j = 1}^k \frac{j e^{j \theta}}{(j - 1) !} }
+    {e^{e^\theta} - \sum_{j = 0}^k \frac{e^{j \theta}}{j !}}
+    -
+    \tau(\theta)^2
+    \\
+    & =
+    \frac{ (\mu + \mu^2) - e^{- \mu}
+    \sum_{j = 1}^k \frac{j \mu^j}{(j - 1) !} }
+    {1 - e^{- \mu} - \sum_{j = 0}^k \frac{\mu^j}{j !}}
+    -
+    \tau(\theta)^2
+\end{split}
+\end{equation}
+By exponential family theory we know $\psi'(\theta) = E_\theta(X)$ and
+$\psi''(\theta) = \var_\theta(X)$, where $X$ is the canonical statistic.
+Thus from our definition of $\tau(\theta)$
+in \eqref{eq:tau} it follows that $\tau'(\theta) = \psi''(\theta) > 0$ for all $\theta$.
+Hence the map $\tau$ is one-to-one and defines an invertible change of parameter.
+Since $\tau(\theta) = E_\theta(X)$, it is called the \emph{mean value parameter}.
+It is the mean of the distribution under discussion: $k$-truncated Poisson.
+
+\subsection{Check}
+
+If these are correct, then \eqref{eq:tau} should be $E(X)$ and 
+the fraction in \eqref{eq:psi-double-prime} should be $E(X^2)$ when $X$ has
+the $k$-truncated Poisson distribution.
+\begin{align*}
+    E(X)
+    & =
+    \sum_{x = k + 1}^\infty x g_\mu(x)
+    \\
+    & =
+    \sum_{x = k + 1}^\infty \frac{x f_\mu(x)}{1 - \sum_{j = 0}^k f_\mu(j)}
+    \\
+    & =
+    \frac{\mu - \sum_{j = 0}^k j f_\mu(j)}{1 - \sum_{j = 0}^k f_\mu(j)}
+\end{align*}
+agrees with \eqref{eq:tau}.
+\begin{align*}
+    E(X^2)
+    & =
+    \sum_{x = k + 1}^\infty \frac{x^2 f_\mu(x)}{1 - \sum_{j = 0}^k f_\mu(j)}
+    \\
+    & =
+    \frac{\mu + \mu^2 - \sum_{j = 0}^k j^2 f_\mu(j)}{1 - \sum_{j = 0}^k f_\mu(j)}
+\end{align*}
+agrees with \eqref{eq:psi-double-prime}.
+
+\subsection{Computing}
+
+As always, we wish to compute things, in this case the cumulant function and its
+first two derivatives, without overflow or cancellation error.
+Problems arise when $\mu$ is nearly zero or when $\mu$ is very large.
+
+\subsubsection{Cumulant Function}
+
+From \eqref{eq:psi} we get, using $\mu = \exp(\theta)$,
+\begin{equation} \label{eq:psi-comp}
+\begin{split}
+    \psi(\theta)
+    & =
+    \mu + \log \left(1 - e^{- \mu} \sum_{j = 0}^k \frac{\mu^j}{j !} \right)
+    \\
+    & =
+    \mu + \log \Prmu \{ Y > k \}
+\end{split}
+\end{equation}
+where $Y \sim \text{Poi}(\mu)$.  This looks fairly stable whether $\mu$ is large or small.
+We will leave the calculation of the log Poisson probability to R.
+
+\subsubsection{First Derivative of Cumulant Function}
+
+From \eqref{eq:tau} we get, using $\mu = \exp(\theta)$,
+\begin{subequations}
+\begin{equation} \label{eq:tau-comp}
+\begin{split}
+    \tau(\theta)
+    & =
+    \frac{ \mu - e^{- \mu} \sum_{j = 1}^k \frac{\mu^j}{(j - 1) !} }
+    {\Prmu \{ Y > k \}}
+    \\
+    & =
+    \frac{ \mu \left[
+    1 - e^{- \mu} \sum_{j = 0}^{k - 1} \frac{\mu^j}{j !} \right] }
+    {\Prmu \{ Y > k \}}
+    \\
+    & =
+    \frac{ \mu \Prmu \{ Y \ge k \}}
+    {\Prmu \{ Y > k \}}
+    \\
+    & =
+    \mu \left( 1 + \frac{\Prmu \{ Y = k \}}
+    {\Prmu \{ Y > k \}} \right)
+\end{split}
+\end{equation}
+
+While this looks good for large $\mu$ it is not at all clear that it behaves well when
+$\mu$ is small.  As $\mu \to 0$ (and $\theta \to - \infty$) we
+have $\tau(\theta) \to k + 1$.  Let us see if we can get a computationally stable way
+to compute that without using L'Hospital's rule.
+\begin{equation} \label{eq:tau-comp-too}
+\begin{split}
+    \tau(\theta)
+    & =
+    \mu
+    +
+    \frac{\mu \Prmu \{ Y = k \}}
+    {\Prmu \{ Y > k \}}
+    \\
+    & =
+    \mu
+    +
+    \frac{\mu^{k + 1} e^{- \mu} / k !}
+    {\mu^{k + 1} e^{- \mu} / (k + 1) ! + \Prmu \{ Y > k + 1 \}}
+    \\
+    & =
+    \mu
+    +
+    \frac{\displaystyle k + 1}
+    {\displaystyle 1 +
+    \frac{\Prmu \{ Y > k + 1 \}}{\Prmu \{ Y = k + 1 \}}}
+\end{split}
+\end{equation}
+\end{subequations}
+When $\mu$ is nearly zero, then the fraction in the denominator is also nearly zero
+and we get nearly $k + 1$ with no chance of overflow.  Oops!  It can produce \verb@NaN@
+(IEEE not a number) when the fraction in the denominator is $0 / 0$,
+actually underflow over underflow.  If we special case this, then everything works.
+
+Actually, our second formula \eqref{eq:tau-comp-too}, seems too work just as well
+as \eqref{eq:tau-comp}, even when $\mu$ is very large.  In calculating $\tau(\theta)$
+from zero to 1000 in steps of 0.1 both formulas give the same answers to within machine
+precision (relative error about $10^{- 16}$) whenever they do not give \verb@Inf@,
+which they do for precisely the same arguments $\theta \le 709.7$.
+
+In hindsight, this is no surprise.  When $\mu \simeq \infty$, then
+$\Prmu \{ Y > k + 1 \} \approx 1$ and $\Prmu \{ Y = k + 1 \} \approx 0$
+and the quotient in the denominator of \eqref{eq:tau-comp-too} either is very large or overflows
+giving \verb@Inf@ when IEEE arithmetic is in use (what happens on ancient computers without it
+is problematic), and the whole fraction is nearly zero.  Hence, when $\mu \simeq \infty$,
+\eqref{eq:tau-comp-too} adds something very small or zero to $\mu$.
+
+\subsubsection{Second Derivative of Cumulant Function}
+
+We start our computation of $\psi''(\theta)$ by noting that $\psi''(\theta) = \tau'(\theta)$,
+and, because $d \mu / d \theta = \mu$,
+$$
+   \tau'(\theta) = \mu \frac{\tau(\mu)}{d \mu}.
+$$
+Thus we differentiate our ``good'' expression \eqref{eq:tau-comp-too} for $\tau$
+expressed in terms of $\mu$.  It will simplify notation if we also define
+$$
+   \beta
+   =
+   \frac{\Prmu \{ Y > k + 1 \}}{\Prmu \{ Y = k + 1 \}}
+   =
+   \frac{e^\mu \Prmu \{ Y > k + 1 \}}{e^\mu \Prmu \{ Y = k + 1 \}}
+$$
+and note that \eqref{eq:tau-comp-too} says
+$$
+   \tau = \mu + \frac{k + 1}{1 + \beta}.
+$$
+so
+$$
+   \frac{d \tau}{d \mu} = 1 - \frac{k + 1}{(1 + \beta)^2} \cdot \frac{d \beta}{d \mu}.
+$$
+To calculate $d \beta / d \mu$ we first figure out
+$$
+   \frac{d}{d \mu} e^\mu \Prmu \{ Y > k + 1 \}
+   =
+   \frac{d}{d \mu} \sum_{y = k + 2}^\infty \frac{\mu^y}{y !}
+   =
+   \sum_{y = k + 2}^\infty \frac{\mu^{y - 1}}{(y - 1) !}
+   =
+   e^\mu \Prmu \{ Y > k \}
+$$
+and
+$$
+   \frac{d}{d \mu} e^\mu \Prmu \{ Y = k + 1 \}
+   =
+   \frac{d}{d \mu} \frac{\mu^{k + 1}}{(k + 1) !}
+   =
+   \frac{\mu^k}{k !}
+   =
+   e^\mu \Prmu \{ Y = k \}
+$$
+Then
+\begin{align*}
+   \frac{d \beta}{d \mu}
+   & =
+   \frac{d}{d \mu} \frac{e^\mu \Prmu \{ Y > k + 1 \}}{e^\mu \Prmu \{ Y = k + 1 \}}
+   \\
+   & =
+   \frac{e^\mu \Prmu \{ Y > k \}}{e^\mu \Prmu \{ Y = k + 1 \}}
+   -
+   \frac{e^\mu \Prmu \{ Y > k + 1 \}}{\left( e^\mu \Prmu \{ Y = k + 1 \} \right)^2}
+   \cdot
+   e^\mu \Prmu \{ Y = k \}
+   \\
+   & =
+   \frac{\Prmu \{ Y > k \}}{\Prmu \{ Y = k + 1 \}}
+   -
+   \frac{\Prmu \{ Y > k + 1 \}}{\Prmu \{ Y = k + 1 \}}
+   \cdot
+   \frac{\Prmu \{ Y = k \}}{\Prmu \{ Y = k + 1 \}}
+   \\
+   & =
+   \frac{\Prmu \{ Y > k + 1 \}}{\Prmu \{ Y = k + 1 \}} + 1
+   -
+   \frac{\Prmu \{ Y > k + 1 \}}{\Prmu \{ Y = k + 1 \}}
+   \cdot
+   \frac{\Prmu \{ Y = k \}}{\Prmu \{ Y = k + 1 \}}
+   \\
+   & =
+   \beta + 1
+   -
+   \beta \cdot
+   \frac{\Prmu \{ Y = k \} }{\Prmu \{ Y = k + 1 \}}
+   \\
+   & =
+   \beta + 1 - \beta \cdot \frac{k + 1}{\mu}
+\end{align*}
+So finally
+\begin{equation} \label{eq:psi-double-prime-comp}
+   \psi''(\theta)
+   =
+   \mu \left( 1 - \frac{k + 1}{1 + \beta}
+   \left( 1 - \frac{k + 1}{\mu} \cdot \frac{\beta}{1 + \beta} \right) \right)
+\end{equation}
+
+\section{Random Variate Generation}
+
+To simulate a $k$-truncated Poisson distribution, the simplest method is to simulate
+ordinary Poisson random variates (using the \verb@rpois@ function in R) and reject all
+of the simulations less than or equal to $k$.
+This works well unless $\mu = \exp(\theta)$, the mean of the untruncated Poisson distribution
+is nearly zero, in which case the acceptance rate is also nearly zero.
+In that case, another simple rejection sampling scheme, simulates $Y \sim \text{Poi}(\mu)$
+and uses $X = Y + m$ as the rejection sampling proposal, where $m$ is a nonnegative integer
+(the case $m = 0$ is the case already discussed).
+
+The ratio of target density to proposal density is
+\begin{equation} \label{eq:rat}
+\begin{split}
+   \frac{g_\mu(x)}{f_\mu(y)}
+   & =
+   \frac{g_\mu(x)}{f_\mu(x - m)}
+   \\
+   & =
+   \frac{f_\mu(x) I(x > k)}{ f_\mu(x - m) \left( 1 - \sum_{j = 0}^k f_\mu(j) \right)}
+   \\
+   & =
+   \frac{(x - m) ! \cdot \mu^m I(x > k)}{ x ! \left( 1 - \sum_{j = 0}^k f_\mu(j) \right)}
+\end{split}
+\end{equation}
+where $I(x > k)$ is one when $x > k$ and zero otherwise.
+This achieves its upper bound (considered as a function of $x$) when $x = \max(m, k + 1)$.
+To avoid the ``max'' let us impose the condition that $m \le k + 1$, so the max is achieved
+when $x = k + 1$ and is
+\begin{equation} \label{eq:maxrat}
+   \frac{(k + 1 - m) ! \cdot \mu^m}{ (k + 1) ! \left( 1 - \sum_{j = 0}^k f_\mu(j) \right)}
+\end{equation}
+Thus we accept proposals with probability \eqref{eq:rat} divided by \eqref{eq:maxrat},
+which is
+\begin{equation} \label{eq:accept-prob}
+   \frac{(x - m) ! (k + 1) !}{ x ! (k + 1 - m) !} \cdot I(x > k)
+\end{equation}
+As noted at the beginning of the discussion, when $m = 0$ we accept a proposal $x$ with
+probability $I(x > k)$.
+When $m = 1$ we accept a proposal $x$ with probability
+$$
+   \frac{k + 1}{x} \cdot I(x > k)
+$$
+and so forth.
+
+To understand the performance of this algorithm, hence to understand how to chose $m$, we need
+to calculate the acceptance rate
+\begin{align*}
+   a(k, m)
+   & =
+   E \left\{
+   \frac{(X - m) ! (k + 1) !}{ X ! (k + 1 - m) !} \cdot I(X > k)
+   \right\}
+   \\
+   & =
+   \frac{(k + 1) !}{ (k + 1 - m) !} \cdot
+   E \left\{
+   \frac{Y !}{ (Y + m) !} \cdot I(Y > k - m)
+   \right\}
+   \\
+   & =
+   \frac{(k + 1) !}{ (k + 1 - m) !}
+   \sum_{y = k + 1 - m}^\infty
+   \frac{y !}{ (y + m) !} \cdot \frac{\mu^y}{y !} e^{-\mu}
+   \\
+   & =
+   \frac{(k + 1) !}{ (k + 1 - m) !}
+   \cdot \frac{1}{\mu^m}
+   \sum_{y = k + 1 - m}^\infty
+   \frac{\mu^{y + m}}{(y + m) !} e^{-\mu}
+   \\
+   & =
+   \frac{(k + 1) !}{ (k + 1 - m) !}
+   \cdot \frac{1}{\mu^m}
+   \sum_{w = k + 1}^\infty
+   \frac{\mu^w}{w !} e^{-\mu}
+   \\
+   & =
+   \frac{(k + 1) !}{ (k + 1 - m) !}
+   \cdot \frac{1}{\mu^m}
+   \cdot \Pr(Y > k)
+\end{align*}
+
+Everything is fixed in our formula for acceptance rate except $m$ which we many choose
+to be any integer $0 \le m \le k + 1$.  Consider
+$$
+   \frac{a(k, m + 1)}{a(k, m)}
+   =
+   \frac{(k + 1 - m)}{\mu}
+$$
+this is greater than one (so it pays to increase $m$) when
+$$
+   k + 1 - m < \mu
+$$
+which suggests we make
+$$
+   m = \lceil k + 1 - \mu \rceil
+$$
+so long as this denotes a nonnegative integer (otherwise we set $m = 0$).
+
+The performance of this algorithm seems to be fine for small $k$.
+However the worst case acceptance rate, which occurs for $\mu$ between $k / 4$ and $k / 2$,
+does seem to go to zero as $k$ goes to infinity.
+For a zero-truncated Poisson distribution the worst case acceptance rate is 63.2\%.
+For a two-truncated Poisson distribution the worst case acceptance rate is 48.2\%.
+For a twenty-truncated Poisson distribution the worst case acceptance rate is 21.6\%.
+For a one-hundred-truncated Poisson distribution the worst case acceptance rate is 10.2\%.
+
+\end{document}
+

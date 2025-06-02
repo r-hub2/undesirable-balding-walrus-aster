@@ -1,0 +1,937 @@
+
+\documentclass[11pt]{article}
+
+\usepackage{indentfirst}
+\usepackage{url}
+\usepackage[utf8]{inputenc}
+
+\RequirePackage{amsmath}
+\newcommand{\boldbeta}{{\boldsymbol{\beta}}}
+\newcommand{\boldeta}{{\boldsymbol{\eta}}}
+\newcommand{\boldtheta}{{\boldsymbol{\theta}}}
+\newcommand{\boldthetahat}{{\boldsymbol{\hat{\theta}}}}
+\newcommand{\boldxi}{{\boldsymbol{\xi}}}
+\newcommand{\boldtau}{{\boldsymbol{\tau}}}
+\newcommand{\boldvarphi}{{\boldsymbol{\varphi}}}
+\newcommand{\boldzeta}{{\boldsymbol{\zeta}}}
+\newcommand{\boldA}{{\mathbf{A}}}
+\newcommand{\boldB}{{\mathbf{B}}}
+\newcommand{\boldM}{{\mathbf{M}}}
+
+% \VignetteIndexEntry{Aster Package Tutorial}
+
+\begin{document}
+
+\title{The Aster Package Tutorial}
+\author{Charles J. Geyer}
+\maketitle
+
+\section{Preliminaries}
+
+\subsection{Library and Data}
+
+<<setup>>=
+library(aster)
+packageDescription("aster")$Version
+data(echinacea)
+@
+That's our package and the dataset for our examples.
+
+\subsection{Digression on Data Entry}
+
+The simplest way to enter your own data into R is to construct a plain
+text file that is a white-space-separated matrix of
+numbers with column headings.
+(Note this means not touched by Microsoft Word or any so-called
+word processors that are incapable of not garbaging up plain text
+with a lot of unwanted formatting junk: if on Microsoft Windows,
+use Microsoft Notepad.)
+
+An example is the file
+\verb@"echinacea.txt"@ found in the \verb@data@ directory of the
+package installation.
+
+This file could read into R as follows
+\begin{verbatim}
+echinacea <- read.table("echinacea.txt", header = TRUE)
+\end{verbatim}
+In fact that's what R did when loading the library.
+
+If you have been so foolish as to give your data to Microsoft Excel,
+you can ask it to give it back by writing out in CSV (Microsoft
+comma separated values format), and it may give you back something usable
+(or it may not: dates are expecially problematic, for some reason).
+If the output is called \verb@echinacea.csv@ then
+\begin{verbatim}
+echinacea <- read.csv("echinacea.csv")
+\end{verbatim}
+will read it into R.
+
+\subsection{Digression on Data Frames}
+
+In either case the R object \verb@echinacea@ created by the \verb@data@
+statement or a \verb@read.table@
+or \verb@read.csv@ command is what R calls a \emph{data frame}.  It prints like
+a matrix but is really a list of vectors of the same length.  The command
+<<data-names>>=
+names(echinacea)
+@
+shows the names of these (vector) variables.  The names are the column
+headings from the input file.  Any variables having character values
+have been coerced to what R calls \emph{factors}.  To see what kind of
+variable each is we can do
+<<data-classes>>=
+sapply(echinacea, class)
+@
+
+In the \verb@echinacea@ data set,
+the variables with numbers in the names are the columns of the response
+matrix of the aster model.
+\begin{itemize}
+\item
+The variables \verb@ld0@$x$ (where $x$ is
+a digit) are the survival indicator variables for year 200$x$
+(one for alive, zero for dead).
+\item
+The variables \verb@fl0@$x$ are the flowering indicator variables
+(one for any flowers, zero for none).
+\item
+The variables \verb@hdct0@$x$ are the inflorescence (flower head) count
+variables (number of flower heads).
+\end{itemize}
+The variables without numbers are other predictors.
+\begin{itemize}
+\item
+The variables \verb@ewloc@ and \verb@nsloc@ are spatial, east-west
+and north-south location, respectively.
+\item
+The variable \verb@pop@ is the remnant population of origin of the plant,
+so plants
+with different values of \verb@pop@ may be more genetically diverse
+than those with the same values of \verb@pop@.
+\end{itemize}
+
+The point of recording the data about flowers in two variables
+\verb@fl0@$x$ and \verb@hdct0@$x$ for any given $x$ when the
+single variable \verb@hdct0@$x$ contains the same information
+(because \verb@fl0@$x$ = 0 if and only if \verb@hdct0@$x$ = 0)
+is because there is no good, simple statistical model for \verb@hdct0@$x$
+by itself.
+
+As we shall see, it makes sense to model the conditional distribution of
+\verb@fl0@$x$ given \verb@ld0@$x$ = 1 as Bernoulli and it makes sense
+to model the conditional distribution of
+\verb@hdct0@$x$ given \verb@fl0@$x$ = 1 as Poisson conditioned on being
+nonzero.  But it would not make sense to model \verb@hdct0@$x$
+given \verb@ld0@$x$ = 1 as Poisson.  The case of zero flowers is special
+and must be modeled separately.
+
+\subsection{Digression on Reshape}
+
+Standard regression-like modeling requires that the ``response'' be
+a vector.  The ``response'' (``data'' would be a better name since it
+plays two roles: $X_{i p(j)}$ is the sample size for $X_{i j}$) is a
+matrix.  If we are going to use any of the R apparatus for doing
+regression-like modeling, in particular if we are going to use the
+R formula mini-language that allows model specifications like
+\verb@y ~ x1 + x2@, then we need to make the response (the \verb@y@
+in the formula) a vector.
+
+There is an R function \verb@reshape@ that does this
+<<reshape>>=
+vars <- c("ld02", "ld03", "ld04", "fl02", "fl03", "fl04",
+    "hdct02", "hdct03", "hdct04")
+redata <- reshape(echinacea, varying = list(vars),
+     direction = "long", timevar = "varb", times = as.factor(vars),
+     v.names = "resp")
+names(redata)
+@
+making a new data frame (in this case \verb@redata@) that has new
+variables (all of the same length because they are in the same data frame)
+\begin{description}
+\item[\normalfont \texttt{resp}] which contains all of the data in the
+variables indicated by the string \verb@vars@ packed into a single vector, the
+name \verb@resp@ being given by the \verb@v.names@ argument of the
+\verb@reshape@ function (you could make it anything you like),
+\item[\normalfont \texttt{varb}] which indicates which original variable the
+corresponding
+element of \verb@resp@ came from, the name being given by the \verb@timevar@
+argument of the \verb@reshape@ function, and
+\item[\normalfont \texttt{id}] which indicates which original individual the
+corresponding
+element of \verb@resp@ came from, the name being given by the \verb@idvar@
+argument of the \verb@reshape@ function (which we didn't specify, accepting
+the default value \verb@"id"@).
+\end{description}
+
+\paragraph{Warning} The variable \verb@vars@ must have the variables
+listed with parent nodes before child nodes.  This doesn't make sense
+now, but is nessary to satisfy condition \eqref{eq:foo}
+on page~\pageref{eq:foo}.
+
+\paragraph{Warning} The variable \verb@varb@ in the data frame produced
+by the \verb@reshape@ function (here called \verb@redata@) must be a factor.
+<<show-redata-varb>>=
+class(redata$varb)
+levels(redata$varb)
+@
+The \verb@redata@ command used above accomplishes this.
+If the argument
+\begin{verbatim}
+times = as.factor(vars)
+\end{verbatim}
+of the \verb@redata@ function is omitted in the call, then this
+will not happen and all of the following analysis will be wrong.
+
+\medskip
+Let's look at an example
+<<reshape-explain>>=
+redata[42, ]
+@
+This says that the 42nd row of the data frame \verb@redata@ has response
+value \Sexpr{redata[42, "resp"]}.  This is the response for the
+\texttt{\Sexpr{redata[42, "varb"]}} original variable
+(node of the graphical model)
+and for individual \Sexpr{redata[42, "id"]} found
+in row \Sexpr{redata[42, "id"]}
+of the original data frame \verb@echinacea@.  The other variables \verb@pop@,
+\verb@ewloc@, and \verb@nsloc@ are what they were in this row
+of \verb@echinacea@
+(for this original individual) and are duplicated as necessary in other
+rows of \verb@redata@.
+
+\section{Unconditional Aster Models}
+
+Now we are ready to begin discussion of Aster models.
+
+\subsection{More Preliminaries}
+
+Then more details.  We must define a few more variables that determine
+the structure of the aster model we intend to work with.  The variable
+\verb@resp@ contains only the random data.  There is also the non-random
+data on the root nodes of the dependence graph of the model.  For reasons
+having to do with the way the R formula mini-language works, we usually
+want this in the same data frame as \verb@resp@
+<<reshape-too>>=
+redata <- data.frame(redata, root = 1)
+names(redata)
+@
+This adds a variable \verb@root@ to the data frame and makes all its values
+one (including for non-root nodes, but those values are ignored by
+all \verb@aster@ package functions).
+
+We also need two vectors of the same length as the number of nodes in the
+graph (so they cannot go in the data frame \verb@redata@),
+call that length \verb@nnode@
+<<graph>>=
+pred <- c(0, 1, 2, 1, 2, 3, 4, 5, 6)
+fam <- c(1, 1, 1, 1, 1, 1, 3, 3, 3)
+sapply(fam.default(), as.character)[fam]
+@
+\begin{description}
+\item[\normalfont \texttt{pred}] specifies the predecessor structure of
+the graph.  With the original variables indexed from 1 to \verb@nnode@,
+in the order that they appear in the variable \verb@vars@ defined above
+and supplied as the \verb@varying@ argument to the \verb@reshape@ function,
+\verb@pred[j]@ gives the index of the predecessor of node \verb@j@.
+In order to make it obvious that \verb@pred@ specifies an acyclic graph,
+we require
+\begin{equation} \label{eq:foo} \tag{$*$}
+\verb@all(pred < seq(along = pred))@
+\end{equation}
+hold.  If \verb@pred[j] == 0@ this indicates \verb@j@ indexes a root node
+(no predecessor).
+\item[\normalfont \texttt{fam}] specifies the one-parameter exponential
+families for the nodes: \verb@fam[j]@ gives the index of the family for
+node \verb@j@, the index being for the list of family specifications
+that is supplied to model fitting functions, the default being the list
+returned by \verb@fam.default()@.
+\end{description}
+
+\paragraph{Comment}  Using an index vector rather than a character vector
+for \verb@fam@ is definitely not the R way.  But having decided
+to make \verb@pred@ an index vector, the same seemed natural for \verb@fam@.
+
+The reason for using an index vector for \verb@pred@ is so the condition
+\eqref{eq:foo} makes sense.  The original variables must be related to
+their order in the data frame \verb@redata@ in any case.
+
+This may change in the future, but that's the way it is for now.
+
+\subsection{Fitting a Model}
+
+We are finally ready to fit a model.
+<<fit-1>>=
+aout1 <- aster(resp ~ varb + nsloc + ewloc + pop,
+    pred, fam, varb, id, root, data = redata)
+summary(aout1, show.graph = TRUE)
+@
+The \verb@show.graph = TRUE@ makes the table about the graph structure
+in the printout.  You always want to look at that carefully once, since
+it tells you whether you have gotten it right.  But (unless you change
+\verb@redata@, \verb@pred@, or \verb@fam@) it won't change thereafter.
+Hence the default is to not print it.
+
+\paragraph{Interpretation.} From looking at the ``signif.\ stars''
+it looks like \verb@pop@ is not significant.  But you're not supposed
+to use ``signif.\ stars'' that way.  Any use of more than one
+``signif.\ star'' per model fit is \emph{multiple testing without correction}
+and may be \emph{highly misleading}.  Wise users put
+<<signif.stars>>=
+options(show.signif.stars = FALSE)
+@
+in their \verb@.Rprofile@ file so they aren't even tempted to foolishness
+by them.  The R default is to print them, so that's what \verb@summary.aster@
+does too.
+
+\subsection{Model Comparison}
+
+The right way to compare models is with a likelihood ratio test.
+To do that, you must fit two models.  So here's another.
+<<fit-2>>=
+aout2 <- aster(resp ~ varb + nsloc + ewloc,
+    pred, fam, varb, id, root, data = redata)
+@
+Now we can compare them with
+<<fit-2-anova>>=
+anova(aout2, aout1)
+@
+
+So much for making inferences from a bunch of signif.\ stars!
+Not one of the signif.\ stars for the \verb@pop@ dummy variables
+in the printout for \verb@aout1@ was anywhere near as significant
+as the likelihood ratio test $p$-value here.  See what we mean?
+
+\paragraph{Warning} (copied from the \verb@anova.aster@ help page)
+\begin{quote}
+     The comparison between two or more models \ldots
+     will only be valid if they are (1) fitted to the
+     same dataset, (2) models are nested, (3) models are of the same
+     type (all conditional or all unconditional), (4) have the same
+     dependence graph and exponential families. None of this is
+     currently checked.
+\end{quote}
+You're not likely to botch (1) or (4).  Just make sure you use the
+same data frame and the same \verb@pred@ and \verb@fam@.  If you're
+a little careful, you won't botch (3).  We haven't done conditional
+models yet (see Section~\ref{sec:conditional}), but when we do, those
+models shouldn't be mixed with unconditional models.  It's
+mixing apples and oranges.  The hard condition
+to always obey is (2).  One must be sure that the column space of
+the model matrix of the big model (\verb@aout1$modmat@) contains
+the column space of the model matrix of the small model (\verb@aout2$modmat@),
+but that is much easier checked by the computer than by you.
+
+\paragraph{Comment} So perhaps the computer should check all this,
+despite none of the R \verb@anova@ functions doing so.  It would take
+time, enough for one linear regression per column of the model matrix
+of the small model, but it would add safety.  The R/C/Unix way
+(a.~k.~a., worse is better) is to not check and let the user worry
+about it.
+
+Anyway (as the warning says) \verb@anova.aster@ and \verb@anova.asterlist@
+currently do not check.  The user must make sure the models are nested
+(otherwise the comparison is theoretically rubbish).
+
+\subsection{Models Based on Pseudo-Covariates}
+
+In a sense the ``covariate'' variable \verb@varb@ is already a
+pseudo-covariate.  It's not a measured variable.  It's an artifice
+we use to overcome the limitations of the R formula mini-language
+insisting that the ``response'' be a vector, rather than a matrix
+with heterogenous columns (like it really is).
+
+In this section we use more artifice.  The variables of interest,
+the best surrogates of Darwinian fitness,
+are the \verb@hdct@ variables.  We want to look that the interaction
+of \verb@pop@ with those variables.  So first we have to create the relevant
+dummy variable.
+<<make-hdct>>=
+hdct <- grep("hdct", as.character(redata$varb))
+hdct <- is.element(seq(along = redata$varb), hdct)
+redata <- data.frame(redata, hdct = as.integer(hdct))
+names(redata)
+@
+This is tricky.  The variable \verb@redata$varb@ is a factor,
+which means it is really numeric (an index vector) under the hood,
+even though it prints as a character string.
+The expression \verb@as.character(redata$varb)@ turns these numeric
+values into strings.
+Then the \verb@grep@ function returns the \emph{indices} of the elements
+of \verb@varb@ whose string forms contain \verb@"hdct"@.  The next
+statement converts these to \verb@TRUE@ or \verb@FALSE@.
+The third statement converts these to one and zero, and makes them
+the variable \verb@hdct@ in the data frame \verb@redata@.
+You might not think of such an R-ish way to do this, but if
+you want to use such a variable in modeling, you must create it
+somehow.
+
+Now we can fit an interaction term.
+<<fit-3>>=
+aout3 <- aster(resp ~ varb + nsloc + ewloc + pop * hdct,
+    pred, fam, varb, id, root, data = redata)
+summary(aout3)
+@
+
+\paragraph{Comment}  The \verb@dropped (aliased)@ means just what
+it says.  The R formula mini-language does not deal correctly with
+pseudo-covariates like this and thinks it should put (a dummy variable
+for) \verb@hdct@ in the model, but that is aliased with the sum of
+(the dummy variables for) \verb@varbhdct02@, \verb@varbhdct03@,
+and \verb@varbhdct04@, so the \verb@aster@ function drops it, but
+not silently (so the user is not surprised).
+
+It turns out this is not the model we wanted to fit.  We didn't want
+population main effects, \verb@popEriley@ and so forth, \emph{in addition to}
+the population interaction effects \verb@popEriley:hdct@ and so forth.  We
+only wanted \verb@pop@ to have effects at the \verb@hdct@ level.
+Here's how we do that
+<<fit-4>>=
+aout4 <- aster(resp ~ varb + nsloc + ewloc + pop * hdct - pop,
+    pred, fam, varb, id, root, data = redata)
+summary(aout4)
+@
+and here's the ANOVA (analysis of deviance, log likelihood ratio test)
+table for these models
+<<fit-4-anova>>=
+anova(aout2, aout4, aout3)
+@
+
+\paragraph{Comment}  When I did this the first time, I made the mistake
+of trying to put model \verb@aout1@ between \verb@aout2@ and \verb@aout4@,
+but that's the mistake we were warned about above!  The models \verb@aout2@
+and \verb@aout4@ are not nested!  (This is obvious when you see they have
+the same degrees of freedom, and even more so when you think about the
+dummy variables they contain.)  The only warning I got was about using
+zero degrees of freedom in a chi-square, not a warning about non-nested
+models.  Be careful!  (This warning goes for all uses of \verb@anova@ in
+R.  It's not only a problem with \verb@anova.aster@.)
+
+\paragraph{Comment}  That's all for modeling of unconditional aster models.
+Note that these are not the spatial effects that were judged the best fitting
+in the paper.  See the tech report (\url{http://www.stat.umn.edu/geyer/aster/})
+for details.
+
+\section{Prediction}
+
+Once you have an aster model, it is a natural question to ask what it means.
+The \verb@anova@ tests give some information about this (which models fit
+better and which fit worse), but there is a lot more to statistics than
+hypothesis tests.
+
+The other standard thing to do with regression-like models is to make
+confidence intervals for parameters.  For reasons that don't make any
+sense in the context of aster models, the function that does this is
+a method of the \verb@predict@ generic function (the reason is that for
+linear models only, this function does both confidence intervals and
+so-called prediction intervals).
+
+With aster models we have a larve variety of parameters to ``predict''.
+Every aster model comes with five different parameterizations
+\begin{description}
+\item[$\boldbeta$] the regression coefficient vector,
+\item[$\boldtheta$] the conditional canonical parameter vector,
+\item[$\boldvarphi$] the unconditional canonical parameter vector,
+\item[$\boldxi$] the conditional mean value parameter vector, and
+\item[$\boldtau$] the unconditional mean value parameter vector.
+\end{description}
+
+\subsection{Regression Coefficients}
+
+The package provides no special support for confidence intervals about
+regression coefficients because of the dictum
+\begin{quote}
+Regression coefficients are meaningless.  Only probabilities and expectations
+are meaningful.
+\end{quote}
+
+In further support of the meaninglessness of regression coefficients note
+that two models specified by different model matrices that have the
+same \emph{column spaces} are essentially the same model.  The MLE regression
+coefficients will be different, but the MLE
+of $\boldtheta$, $\boldvarphi$, $\boldxi$, and $\boldtau$ are identical
+for both models,
+as are predicted probabilities of all events and predicted expectations
+of all random variables.  Once you understand that, how can you \emph{reify}
+regression coefficients?
+
+\subsection{Using the Summary}
+
+Nevertheless, now that we have had our tendentious rant, we do tell you
+how to make confidence intervals for betas.  The summary function gives
+standard errors, so one way is
+<<conf-level>>=
+conf.level <- 0.95
+crit <- qnorm((1 + conf.level) / 2)
+@
+<<beta-4-one>>=
+fred <- summary(aout4)
+dimnames(fred$coef)
+fred$coef["popEriley:hdct", "Estimate"] +
+c(-1, 1) * crit * fred$coef["popEriley:hdct", "Std. Error"]
+@
+This gives an asymptotic (large sample) \Sexpr{100 * conf.level}\% confidence
+interval for the unknown true regression coefficient for the dummy variable
+\verb@popEriley:hdct@ (assuming this model is correct!)
+
+\subsection{Using Fisher Information}
+
+Those who know master's level theoretical statistics, know the standard
+error here is based on inverse Fisher information, which is found in
+the output of \verb@aster@.  So another way to do the same interval is
+<<beta-4-one-fish>>=
+aout4$coef[12] + c(-1, 1) * crit * sqrt(solve(aout4$fish)[12, 12])
+@
+
+\subsection{Using Fisher Information (Continued)}
+
+The reason for even mentioning Fisher information is that it is essential
+if you want to make any other intervals for betas other than the ones
+\verb@summary.aster@ helps with.  For example, suppose you want an interval
+for $\beta_{12} - \beta_{13}$.  How do you do that?
+<<beta-4-two-fish>>=
+inv.fish.info <- solve(aout4$fish)
+(aout4$coef[12] - aout4$coef[13]) + c(-1, 1) * crit *
+sqrt(inv.fish.info[12, 12] + inv.fish.info[13, 13] - 2 * inv.fish.info[12, 13])
+@
+If that doesn't make sense, you'll have to review your master's level theory
+notes.  We can't explain everything.  But fortunately, if you understand
+the meaninglessness of regression coefficients, you'll never want to do that
+anyway.
+
+\subsection{Canonical Parameters}
+
+Canonical parameters are only slightly less meaningless than regression
+coefficients.  They still aren't probabilities and expectations that have
+real world meaning.  However, \verb@predict.aster@ does give support for
+``predicting'' canonical parameters.
+
+There are, however a huge number of canonical parameters, one for each
+individual and node of the graphical model (same goes for mean value
+parameters).  There are two ways we simplify the situation (both are standard
+in doing regression ``predictions'')
+\begin{itemize}
+\item predict only for one (or a few) hypothetical or real ``new'' individuals
+and
+\item predict a linear functional of the parameter.
+\end{itemize}
+For the former we ``predict'' using a new model matrix whose entries refer
+to the ``new'' individuals rather than the ``old'' ones we used to fit the
+data.  For the latter we predict $\boldA' \boldzeta$ where $\boldA$ is a
+fixed, known matrix and $\boldzeta$ is the parameter we want to estimate
+(any of $\boldtheta$, $\boldvarphi$, $\boldxi$, or $\boldtau$).
+
+\subsubsection{New Data}
+
+We construct new data for ``typical'' individuals
+(having zero-zero geometry) in each population.
+<<predict-newdata>>=
+newdata <- data.frame(pop = levels(echinacea$pop))
+for (v in vars)
+    newdata[[v]] <- 1
+newdata$root <- 1
+newdata$ewloc <- 0
+newdata$nsloc <- 0
+@
+
+We are using bogus data $x_{i j} = 1$ for all $i$ and $j$.
+The predictions for $\boldtheta$ and $\boldvarphi$ do not depend
+on new data anyway.
+Predictions for $\boldtau$ depend only on the new \verb@root@ data
+but not on the other data variables.
+
+Predictions for $\boldxi$ do depend only on all the new data, but
+for hypothetical individuals we have no data to give them!  This
+is an odd aspect of aster models, that data $x_{i j}$ plays the role of the
+response and also of a predictor when it appears as $x_{i p(j)}$.
+The prediction section of the paper explains why we usually want this
+hypothetical data to be all ones.
+
+<<predict-newdata-reshape>>=
+renewdata <- reshape(newdata, varying = list(vars),
+     direction = "long", timevar = "varb", times = as.factor(vars),
+     v.names = "resp")
+hdct <- grep("hdct", as.character(renewdata$varb))
+hdct <- is.element(seq(along = renewdata$varb), hdct)
+renewdata <- data.frame(renewdata, hdct = as.integer(hdct))
+names(redata)
+names(renewdata)
+@
+
+\subsubsection{Linear Functional Matrix}
+
+The functional of mean value parameters we want is \emph{total head count},
+since this has the biological interpretation of the best surrogate of fitness
+measured in this data set.  A biologist (at least an evolutionary biologist)
+is interested in the ``predecessor variables'' of head count only insofar
+as they contribute to head count.  Two sets of parameter values that
+``predict'' the same expected total head count (over the three years the
+data were collected) have the same contribution to fitness.  So that is
+the ``prediction'' (really functional of mean value parameters) we ``predict.''
+<<make-amat>>=
+nind <- nrow(newdata)
+nnode <- length(vars)
+amat <- array(0, c(nind, nnode, nind))
+for (i in 1:nind)
+    amat[i , grep("hdct", vars), i] <- 1
+@
+This says that the $i$-th component of the predicted linear functional
+is the sum of the variables having \verb@"hdct"@ in their names for the
+$i$-th individual (in the new hypothetical data \verb@newdata@).  The
+linear functional is a simple sum because the elements of \verb@amat@
+are all zero or one.
+
+This is a little tricky, so let's take it one step at a time.  We are
+trying to form the linear functional $\boldA' \boldtau$, which written
+out in full is the vector with $k$-th component
+$$
+   \sum_{i \in I_{\text{new}}} \sum_{j \in J} a_{i j k} \tau_{i j}
+$$
+where $a_{i j k}$ are the elements of the array $\boldA$ and $\tau_{i j}$
+are the elements of the matrix of unconditional mean value
+parameters $\boldtau$ and where $I_{\text{new}}$ is the index set for
+the ``new hypothetical'' individuals in \verb@newdata@.  Since there
+is one such ``new hypothetical'' individual for each population,
+$I_{\text{new}}$ indexes populations \emph{in this particular example}.
+
+For such an individual, for an $i \in I_{\text{new}}$, we want the
+corresponding component of $\boldA' \boldtau$ to be that individual's
+total flower head count, the sum of the $\tau_{i j}$ such that $j$ is
+a head count variable.  Hence \emph{in this particular example} we want
+the dimension of $\boldA' \boldtau$ to be the same as the number of
+individuals (meaning $i$ and $k$ run over the same index set $I_{\text{new}}$).
+The way we make $\boldA' \boldtau$ be this sum is to set the components of
+$a_{i, \,\cdot\,, i}$ be one for the terms we want in the sum and zero
+for the terms we don't want in the sum, and that's exactly what the R
+code above does.
+
+Note, that in general $i$ and $k$ will run over different index sets
+and that in general there is no reason why the components $a_{i j k}$
+must be zero or one.  How one constructs $a_{i j k}$ varies a great deal
+from application to application.  This example only illustrates one very
+particular special case.
+
+\subsubsection{Prediction}
+
+So we are finally ready to make a ``prediction''
+<<varphi-4-red-fish>>=
+foo <- predict(aout4, varvar = varb, idvar = id, root = root,
+    newdata = renewdata, se.fit = TRUE, amat = amat,
+    parm.type = "canon")
+bar <- cbind(foo$fit, foo$se.fit)
+dimnames(bar) <- list(as.character(newdata$pop), c("Estimate", "Std. Error"))
+print(bar)
+@
+Since the default \verb@model.type@ is \verb@"unconditional"@, these are
+(linear functionals of) the unconditional canonical parameters $\boldvarphi$.
+
+And for our next trick (neither of these are motivated by a particular
+scientific question---we're just illustrating the use of \verb@predict.aster@).
+<<theta-4-blue-fish>>=
+foo <- predict(aout4, varvar = varb, idvar = id, root = root,
+    newdata = renewdata, se.fit = TRUE, amat = amat,
+    parm.type = "canon", model.type = "cond")
+bar <- cbind(foo$fit, foo$se.fit)
+dimnames(bar) <- list(as.character(newdata$pop), c("Estimate", "Std. Error"))
+print(bar)
+@
+These are
+(linear functionals of) the conditional canonical parameters $\boldtheta$.
+
+Woof!  When I saw this the first time, I spent over an hour trying to track
+down the bug in \verb@predict.aster@ that gives the same predictions for
+two different types of parameters.  But it's not a bug. The canonical
+parameters for ``leaf'' nodes (no successors) \emph{are} the same!
+
+Let's try the \verb@"ld"@ level (mortality)
+<<make-bmat>>=
+bmat <- array(0, c(nind, nnode, nind))
+for (i in 1:nind)
+    bmat[i , grep("ld", vars), i] <- 1
+@
+<<bmat-4-fish-knife>>=
+foo <- predict(aout4, varvar = varb, idvar = id, root = root,
+    newdata = renewdata, se.fit = TRUE, amat = bmat,
+    parm.type = "canon")
+bar <- cbind(foo$fit, foo$se.fit)
+dimnames(bar) <- list(as.character(newdata$pop), c("Estimate", "Std. Error"))
+print(bar)
+foo <- predict(aout4, varvar = varb, idvar = id, root = root,
+    newdata = renewdata, se.fit = TRUE, amat = bmat,
+    parm.type = "canon", model.type = "cond")
+bar <- cbind(foo$fit, foo$se.fit)
+dimnames(bar) <- list(as.character(newdata$pop), c("Estimate", "Std. Error"))
+print(bar)
+@
+
+Now quite different!  And we have another puzzle.  Why, according to
+aster model theory is it the right thing that all of the $\xi_{i j}$
+are the same where $j$ is for an \verb@"ld"@ node?  Just look at the
+model: we don't have an interaction of \verb@ld@ and \verb@pop@.
+<<bmat-4-fish-fash>>=
+foo <- predict(aout3, varvar = varb, idvar = id, root = root,
+    newdata = renewdata, se.fit = TRUE, amat = bmat,
+    parm.type = "canon")
+bar <- cbind(foo$fit, foo$se.fit)
+dimnames(bar) <- list(as.character(newdata$pop), c("Estimate", "Std. Error"))
+print(bar)
+@
+If instead we use the model \verb@aout3@, which does have such an interaction
+(the interaction is with non-\verb@hdct@, but that includes \verb@ld@),
+then the $\xi_{i j}$ are different.
+
+What this all proves other than that aster models are complicated, I don't
+know.  The point is just to give some examples.  We don't think scientists
+should want to ``predict'' canonical parameters much (except perhaps just
+to see what's going on under the hood of some model).
+
+\subsection{Mean Value Parameters}
+
+To repeat our mantra
+\begin{quote}
+Only probabilities and expectations are meaningful.
+\end{quote}
+The parameters that \verb@predict.aster@ can predict and that are meaningful
+(according to our mantra) are \emph{mean value parameters}.  As with everything
+else, there are two kinds, conditional and unconditional
+($\boldxi$ and $\boldtau$, respectively).
+
+Let's try that.
+<<tau-4-amat>>=
+pout3 <- predict(aout3, varvar = varb, idvar = id, root = root,
+    newdata = renewdata, se.fit = TRUE, amat = amat)
+pout4 <- predict(aout4, varvar = varb, idvar = id, root = root,
+    newdata = renewdata, se.fit = TRUE, amat = amat)
+@
+
+Figure~\ref{fig:one} is produced by the
+following code
+<<label=fig1plot,include=FALSE>>=
+popnames <- as.character(newdata$pop)
+fit3 <- pout3$fit
+fit4 <- pout4$fit
+i <- seq(along = popnames)
+foo <- 0.1
+y4top <- fit4 + crit * pout4$se.fit
+y4bot <- fit4 - crit * pout4$se.fit
+y3top <- fit3 + crit * pout3$se.fit
+y3bot <- fit3 - crit * pout3$se.fit
+plot(c(i - 1.5 * foo, i - 1.5 * foo, i + 1.5 * foo, i + 1.5 * foo),
+    c(y4top, y4bot, y3top, y3bot), type = "n", axes = FALSE,
+    xlab = "", ylab = "")
+segments(i - 1.5 * foo, y4bot, i - 1.5 * foo, y4top)
+segments(i - 2.5 * foo, y4bot, i - 0.5 * foo, y4bot)
+segments(i - 2.5 * foo, y4top, i - 0.5 * foo, y4top)
+segments(i - 2.5 * foo, fit4, i - 0.5 * foo, fit4)
+segments(i + 1.5 * foo, y3bot, i + 1.5 * foo, y3top, lty = 2)
+segments(i + 2.5 * foo, y3bot, i + 0.5 * foo, y3bot)
+segments(i + 2.5 * foo, y3top, i + 0.5 * foo, y3top)
+segments(i + 2.5 * foo, fit3, i + 0.5 * foo, fit3)
+axis(side = 2)
+title(ylab = "unconditional mean value parameter")
+axis(side = 1, at = i, labels = popnames)
+title(xlab = "population")
+@
+and appears on p.~\pageref{fig:one}.
+\begin{figure}
+\begin{center}
+<<label=fig1,fig=TRUE,echo=FALSE>>=
+<<fig1plot>>
+@
+\end{center}
+\caption{\Sexpr{100 * conf.level}\% confidence intervals for unconditional
+mean value parameter for fitness (sum of head count for all years) at each
+population for a ``typical'' individual having position zero-zero and having
+the parameterization of Model~4 (solid bar) or Model~3 (dashed bar).
+Tick marks in the middle of the bars are the center (the MLE).}
+\label{fig:one}
+\end{figure}
+
+Figure~\ref{fig:one} looks pretty much like the plot in the paper.
+It's a little different because the spatial part of the model (involving
+\verb@ewloc@ and \verb@nsloc@ is simpler).
+
+These confidence intervals have real-world meaning.  The parameters predicted
+are expected flower head count over the course
+of the experiment for ``typical'' individuals (``typical'' spatial location
+smack dab in the middle because we centered the spatial coordinates to
+have median zero) at each of the populations.
+(BTW I have no idea why \verb@axis@
+leaves off one of the population labels when there's plenty of room.
+To get this
+plot right for the paper I just edited the PostScript file and put in the
+missing label by hand.  If you ask me, it's a bug.  But the \verb@axis@
+maintainer would probably say it's a feature.)
+
+As we have seen, you can ``predict'' any kind of parameter
+($\boldbeta$, $\boldtheta$, $\boldvarphi$, $\boldxi$, or $\boldtau$)
+for any model.  All of the examples so far have been unconditional
+aster models (FEF).  But we could have done everything above if
+we had originally fit conditional aster models (CEF).
+
+\section{Conditional Aster Models} \label{sec:conditional}
+
+We could now repeat everything above \emph{mutatis mutandis}.
+The only thing that would change is an argument \verb@type = "conditional"@
+to any call to the \verb@aster@ function.  Then everything else works
+exactly the same (of course the actual numerical results are different,
+but the other function calls to \verb@summary.aster@, \verb@anova.aster@,
+or \verb@predict.aster@ are meaningful without change).
+
+Let's look at one example.
+<<make-cout>>=
+cout4 <- aster(resp ~ varb + nsloc + ewloc + pop * hdct - pop,
+    pred, fam, varb, id, root, data = redata, type = "cond")
+pcout4 <- predict(cout4, varvar = varb, idvar = id, root = root,
+    newdata = renewdata, se.fit = TRUE, amat = amat)
+@
+Note that these are exactly the same as the commands that made
+\verb@pout4@ except for the extra argument \verb@type = "cond"@
+in the \verb@aster@ function call.  Thus we have fit a conditional
+aster model (CEF) but predicted exactly the same $\boldA' \boldtau$
+as in \verb@pout4@.
+
+Figure~\ref{fig:two} compares these two ``predictions'' and is produced by the
+following code
+<<label=fig2plot,include=FALSE>>=
+popnames <- as.character(newdata$pop)
+fit3 <- pcout4$fit
+fit4 <- pout4$fit
+i <- seq(along = popnames)
+foo <- 0.1
+y4top <- fit4 + crit * pout4$se.fit
+y4bot <- fit4 - crit * pout4$se.fit
+y3top <- fit3 + crit * pcout4$se.fit
+y3bot <- fit3 - crit * pcout4$se.fit
+plot(c(i - 1.5 * foo, i - 1.5 * foo, i + 1.5 * foo, i + 1.5 * foo),
+    c(y4top, y4bot, y3top, y3bot), type = "n", axes = FALSE,
+    xlab = "", ylab = "")
+segments(i - 1.5 * foo, y4bot, i - 1.5 * foo, y4top)
+segments(i - 2.5 * foo, y4bot, i - 0.5 * foo, y4bot)
+segments(i - 2.5 * foo, y4top, i - 0.5 * foo, y4top)
+segments(i - 2.5 * foo, fit4, i - 0.5 * foo, fit4)
+segments(i + 1.5 * foo, y3bot, i + 1.5 * foo, y3top, lty = 2)
+segments(i + 2.5 * foo, y3bot, i + 0.5 * foo, y3bot)
+segments(i + 2.5 * foo, y3top, i + 0.5 * foo, y3top)
+segments(i + 2.5 * foo, fit3, i + 0.5 * foo, fit3)
+axis(side = 2)
+title(ylab = "unconditional mean value parameter")
+axis(side = 1, at = i, labels = popnames)
+title(xlab = "population")
+@
+and appears on p.~\pageref{fig:two}.
+\begin{figure}
+\begin{center}
+<<label=fig2,fig=TRUE,echo=FALSE>>=
+<<fig2plot>>
+@
+\end{center}
+\caption{\Sexpr{100 * conf.level}\% confidence intervals for unconditional
+mean value parameter for fitness (sum of head count for all years) at each
+population for a ``typical'' individual having position zero-zero and having
+the parameterization of Model~4, either an unconditional model (solid bar)
+or conditional model (dashed bar).
+Tick marks in the middle of the bars are the center (the MLE).}
+\label{fig:two}
+\end{figure}
+
+Now note that the two types of intervals (solid and dashed) are wildly
+different.  Of course, they \emph{should} be wildy different because
+the two types of models, one with $\boldvarphi = \boldM \boldbeta$
+and the other with $\boldtheta = \boldM \boldbeta$,
+are radically different.  There is no reason for the two types of predictions
+(of exactly the same thing) based on two radically different models should
+be similar.  And they aren't.  So we are only seeing what we should expect
+to see, and this doesn't prove anything about anything (except for the
+trivial fact that FEF and CEF aster models are different).
+
+\paragraph{Comment} We haven't really done justice to conditional models.
+Since this is a tutorial, we don't have to.  As we said (twice), everything
+is the same except for \verb@type = "cond"@ in the appropriate place.
+
+And this is not the place to explain why one would want to use a conditional
+or unconditional model.  And, to be honest, we don't know.  We know, and
+explain in the paper, what each one does and why
+\begin{quote}
+Conditional aster models are simple algebraically,
+but complicated statistically.
+
+Unconditional aster models are complicated algebraically,
+but simple statistically.
+\end{quote}
+
+But we have to admit that these arguments from theoretical statistics
+may cut no ice with scientists, even if understood.  It all depends
+on what particular scientific questions one is trying to answer.
+Thus we have written the \verb@aster@ package to be completely even-handed
+(except for defaults) with respect to conditional and unconditional
+(models or parameters).  Whatever can be done with one kind can be done
+with the other.  So use whatever you think right.
+
+\section{Simulation}
+
+One function we haven't covered is \verb@raster@ which simulates aster
+models.  Let's check the coverage of some of our
+so-called \Sexpr{100 * conf.level}\% confidence intervals.
+
+We start with another use of \verb@predict@.  The \verb@raster@ function
+wants $\boldtheta$ or, to be more precise, here we use $\boldthetahat$.
+<<make-theta>>=
+theta.hat <- predict(aout4, model.type = "cond", parm.type = "canon")
+theta.hat <- matrix(theta.hat, nrow = nrow(aout4$x), ncol = ncol(aout4$x))
+fit.hat <- pout4$fit
+beta.hat <- aout4$coefficients
+@
+We also need root data, and it will be simpler if we actually don't
+use the forms of the \verb@aster@ and \verb@predict.aster@ functions
+that take formulas
+(because then we don't have to cram the simulated data in a data frame
+and we avoid a lot of repetitive parsing of the same formulas)
+<<make-root>>=
+root <- aout4$root
+modmat <- aout4$modmat
+modmat.pred <- pout4$modmat
+x.pred <- matrix(1, nrow = dim(modmat.pred)[1], ncol = dim(modmat.pred)[2])
+root.pred <- x.pred
+@
+Now we're ready for a simulation
+<<doit>>=
+set.seed(42)
+nboot <- 100
+cover <- matrix(0, nboot, length(fit.hat))
+for (iboot in 1:nboot) {
+    xstar <- raster(theta.hat, pred, fam, root)
+    aout4star <- aster(xstar, root, pred, fam, modmat, beta.hat)
+    pout4star <- predict(aout4star, x.pred, root.pred, modmat.pred,
+        amat, se.fit = TRUE)
+    upper <- pout4star$fit + crit * pout4star$se.fit
+    lower <- pout4star$fit - crit * pout4star$se.fit
+    cover[iboot, ] <- as.numeric(lower <= fit.hat & fit.hat <= upper)
+}
+pboot <- apply(cover, 2, mean)
+pboot.se <- sqrt(pboot * (1 - pboot) / nboot)
+cbind(pboot, pboot.se)
+@
+
+Not bad for the small \verb@nboot@.  We won't try a serious simulation
+because it would make this tutorial run too long.
+
+\paragraph{Comment}
+
+Other optimization options (calling \verb@optim@ are available), but
+are slower.  See \url{http://www.stat.umn.edu/geyer/trust/time.pdf}.
+Using \verb@method = "nlm"@ instead of the default \verb@method = "trust"@
+takes 3--4 times as long, and using either method that calls \verb@optim@
+(either \verb@method = "L-BFGS-B"@ or \verb@method = "CG"@) takes about
+16 times as long.
+So whatever problems \verb@nlm@ and \verb@optim@ is good for,
+they don't appear to include strictly convex objective functions
+like aster models have.
+The starting parameter value \verb@beta.hat@ is supposed to speed things
+up, giving the optimization a good starting point (the simulation truth).
+We haven't investigated whether it does or not.
+
+\end{document}
+
+\begin{center} \LARGE REVISED DOWN TO HERE \end{center}
+

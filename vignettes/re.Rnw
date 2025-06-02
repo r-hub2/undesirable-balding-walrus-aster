@@ -1,0 +1,1857 @@
+
+\documentclass[11pt]{article}
+
+\usepackage{amsmath}
+\usepackage{amsfonts}
+\usepackage{indentfirst}
+\usepackage{natbib}
+\usepackage{url}
+
+\newcommand{\real}{\mathbb{R}}
+\newcommand{\set}[1]{\{\, #1 \,\}}
+\newcommand{\inner}[1]{\langle #1 \rangle}
+\newcommand{\abs}[1]{\lvert #1 \rvert}
+\newcommand{\norm}[1]{\lVert #1 \rVert}
+
+\DeclareMathOperator{\var}{var}
+\DeclareMathOperator{\tr}{tr}
+\DeclareMathOperator{\cl}{cl}
+
+\newcommand{\fatdot}{\,\cdot\,}
+
+\newcommand{\opand}{\mathbin{\rm and}}
+\newcommand{\opor}{\mathbin{\rm or}}
+
+% \VignetteIndexEntry{Random Effects Design Document}
+
+\begin{document}
+
+\title{Design Document for Random Effects Aster Models}
+
+\author{Charles J. Geyer}
+
+\maketitle
+
+\begin{abstract}
+This design document works out details of approximate maximum likelihood
+estimation for aster models with random effects.
+Fixed and random effects are estimated by penalized log likelihood.
+Variance components are estimated by integrating out the random effects
+in the Laplace approximation of the complete data likelihood
+(this can be done analytically) and maximizing the resulting approximate
+missing data likelihood.
+A further approximation treats the second derivative matrix of the cumulant
+function of the exponential family where it appears in the approximate
+missing data log likelihood as a constant (not a function of parameters).
+Then first and second derivatives of the approximate missing data log
+likelihood can be done analytically.  Minus the second derivative matrix
+of the approximate missing data log likelihood is treated as approximate
+Fisher information and used to estimate standard errors.
+\end{abstract}
+
+\section{Theory}
+
+Aster models \citep*{gws,aster2} have attracted much recent attention.
+Several researchers have raised the issue of incorporating random effects
+in aster models, and we do so here.
+
+\subsection{Complete Data Log Likelihood} \label{sec:complete}
+
+Although we are particularly interested in aster models \citep{gws}, our
+theory works for any exponential family model.  The log likelihood can
+be written
+$$
+   l(\varphi) = y^T \varphi - c(\varphi),
+$$
+where $y$ is the canonical statistic vector,
+$\varphi$ is the canonical parameter vector,
+and the cumulant function $c$ satisfies
+\begin{align}
+   \mu(\varphi) & = E_{\varphi}(y) = c'(\varphi)
+   \label{eq:moo}
+   \\
+   W(\varphi) & = \var_{\varphi}(y) = c''(\varphi)
+   \label{eq:w}
+\end{align}
+where $c'(\varphi)$ denotes the vector of first partial derivatives
+and $c''(\varphi)$ denotes the matrix of second partial derivatives.
+
+We assume a canonical affine submodel with random effects determined by
+\begin{equation} \label{eq:can-aff-sub}
+   \varphi = a + M \alpha + Z b,
+\end{equation}
+where $a$ is a known vector, $M$ and $Z$ are known matrices, $b$
+is a normal random vector with mean vector zero and
+variance matrix $D$.
+The vector $a$ is called the \emph{offset vector} and the matrices
+$M$ and $Z$ are called the \emph{model matrices} for fixed and random
+effects, respectively, in the terminology of the R function \texttt{glm}.
+(The vector $a$ is called the \emph{origin} in the terminology of the
+R function \texttt{aster}.  \emph{Design matrix} is alternative
+terminology for \texttt{model matrix}.)
+The matrix $D$ is assumed to be diagonal,
+so the random effects are independent random variables.
+The diagonal components of $D$ are called \emph{variance components}
+in the classical terminology of random effects models \citep{searle}.
+Typically the components of $b$ are divided into blocks having the same
+variance \citep[Section~6.1]{searle}, so there are only
+a few variance components but many random effects, but nothing in this
+document uses this fact.
+
+The unknown parameter vectors are $\alpha$ and $\nu$, where $\nu$ is
+the vector of variance components.  Thus $D$ is a function of $\nu$,
+although this is not indicated by the notation.
+
+The ``complete data log likelihood'' (i.~e., what the log likelihood would
+be if the random effect vector $b$ were observed) is
+\begin{equation} \label{eq:foo}
+   l_c(\alpha, b, \nu)
+   =
+   l(a + M \alpha + Z b)
+   - \tfrac{1}{2} b^T D^{- 1} b
+   - \tfrac{1}{2} \log \det(D)
+\end{equation}
+in case none of the variance components are zero.
+We deal with the case of zero variance components in Sections~\ref{sec:zero},
+\ref{sec:raw}, and~\ref{sec:roots} below.
+
+\subsection{Missing Data Likelihood}
+
+Ideally, inference about the parameters should be based on
+the \emph{missing data likelihood}, which is the complete data likelihood with
+random effects $b$ integrated out
+\begin{equation} \label{eq:bar}
+   L_m(\alpha, \nu) = \int e^{l_c(\alpha, b, \nu)} \, d b
+\end{equation}
+Maximum likelihood estimates (MLE) of $\alpha$ and $\nu$ are the values that
+maximize \eqref{eq:bar}.  However MLE are hard to find.  The integral in
+\eqref{eq:bar} cannot be done analytically, nor can it be done by numerical
+integration except in very simple cases.
+There does exist a large literature on doing such integrals
+by ordinary or Markov chain Monte Carlo
+\citep*{thompson,g+t,mcmcml,promislow,shaw-geyer-shaw,sung},
+but these methods take a great
+deal of computing time and are difficult for ordinary users to apply.
+We wish to avoid that route if at all possible.
+
+\subsection{A Digression on Minimization} \label{sec:minimize}
+
+The theory of constrained optimization (Section~\ref{sec:raw} below)
+has a bias in favor of minimization rather than maximization.
+The explication below will be simpler if we switch now from maximization
+to minimization (minimizing minus the log likelihood) rather than switch
+later.
+
+\subsection{Laplace Approximation} \label{sec:laplace}
+
+\citet{b+c} proposed to replace the integrand in \eqref{eq:bar} by
+its Laplace approximation, which is a normal probability density function
+so the random effects can be integrated out analytically.
+Let $b^*$ denote the result of maximizing \eqref{eq:foo} considered
+as a function of $b$ for fixed $\alpha$ and $\nu$.
+Then $- \log L_m(\alpha, \nu)$ is approximated by
+$$
+   q(\alpha, \nu)
+   =
+   \tfrac{1}{2} \log \det[\kappa''(b^*)] + \kappa(b^*)
+$$
+where
+\begin{align*}
+   \kappa(b)
+   & =
+   - l_c(a + M \alpha + Z b)
+   \\
+   \kappa'(b)
+   & =
+   - Z^T [ y + \mu(a + M \alpha + Z b) ] + D^{-1} b
+   \\
+   \kappa''(b)
+   & =
+   Z^T W(a + M \alpha + Z b) Z + D^{-1}
+\end{align*}
+Hence
+\begin{equation} \label{eq:log-pickle}
+\begin{split}
+   q(\alpha, \nu)
+   & =
+   - l_c(\alpha, b^*, \nu)
+   + \tfrac{1}{2} \log
+   \det\bigl[ \kappa''(b^*) \bigr]
+   \\
+   & =
+   - l(a + M \alpha + Z b^*)
+   + \tfrac{1}{2} (b^*)^T D^{-1} b^*
+   + \tfrac{1}{2} \log \det(D)
+   \\
+   & \qquad
+   + \tfrac{1}{2} \log
+   \det\bigl[ Z^T W(a + M \alpha + Z b^*) Z + D^{-1} \bigr]
+   \\
+   & =
+   - l(a + M \alpha + Z b^*)
+   + \tfrac{1}{2} (b^*)^T D^{-1} b^*
+   \\
+   & \qquad
+   + \tfrac{1}{2} \log
+   \det\bigl[ Z^T W(a + M \alpha + Z b^*) Z D + I \bigr]
+\end{split}
+\end{equation}
+where $I$ denotes the identity matrix of the appropriate dimension
+(which must be the same as the dimension of $D$ for the expression it
+appears in to make sense),
+where $b^*$ is a function of $\alpha$ and $\nu$
+and $D$ is a function of $\nu$, although this is not indicated by the
+notation, and where
+the last equality uses the rule sum of logs is log of product and
+the rule product of determinants is determinant of matrix product
+\citep[Theorem~13.3.4]{harville}.
+
+Since minus the log likelihood of an exponential family is a convex function
+\citep[Theorem~9.1]{barndorff} and the middle term on the right-hand side
+of \eqref{eq:foo} is a strictly convex function, it follows that
+\eqref{eq:foo} considered as a function of $b$ for fixed $\alpha$ and $\nu$
+is a strictly convex function.
+Moreover, this function has bounded level sets, because the middle
+term on the right-hand side of \eqref{eq:foo} does.
+It follows that there is unique global minimizer
+\citep[Theorems~1.9 and~2.6]{raw}.
+Thus $b^*(\alpha, \nu)$ is well defined for all values
+of $\alpha$ and $\nu$.
+
+The key idea is to use \eqref{eq:log-pickle} as if it were the log likelihood
+for the unknown parameters ($\alpha$ and $\nu$), although it is only an
+approximation.  However, this is also problematic.  In doing likelihood
+inference using \eqref{eq:log-pickle} we need first and second derivatives
+of it (to calculate Fisher information), but $W$ is already
+the second derivative matrix of the cumulant function, so
+first derivatives of \eqref{eq:log-pickle} would involve third derivatives
+of the cumulant function and
+second derivatives of \eqref{eq:log-pickle} would involve fourth derivatives
+of the cumulant function.  For aster models there are no published
+formulas for derivatives higher than second of the aster model cumulant
+function nor does
+software (the R package \texttt{aster},
+\citealp{package-aster}) provide such ---
+the derivatives do, of course, exist because every cumulant function of
+a regular exponential family is infinitely differentiable at every
+point of the canonical parameter space \citep[Theorem~8.1]{barndorff} ---
+they are just not readily available.
+\citet{b+c} noted the same problem in the context of GLMM, and proceeded as
+if $W$ were a constant function of its argument, so all derivatives of $W$
+were zero.  This is not a bad approximation because ``in asymptopia'' the
+aster model log likelihood is exactly quadratic and $W$ is a constant function,
+this being a general property of likelihoods \citep{simple}.  Hence we adopt
+this idea too, more because we are forced to by the difficulty of
+differentiating $W$ than by our belief that we are ``in asymptopia.''
+
+This leads to the following idea.  Rather than basing inference on
+\eqref{eq:log-pickle}, we actually use
+\begin{equation} \label{eq:log-pickle-too}
+   q(\alpha, \nu)
+   =
+   - l(a + M \alpha + Z b^*)
+   + \tfrac{1}{2} (b^*)^T D^{-1} b^*
+   + \tfrac{1}{2} \log
+   \det\bigl[ Z^T \widehat{W} Z D + I \bigr]
+\end{equation}
+where $\widehat{W}$ is a constant matrix (not a function of $\alpha$ and
+$\nu$).  This makes sense for any
+choice of $\widehat{W}$ that is symmetric and positive semidefinite,
+but we will choose $\widehat{W}$ that are close to
+$W(a + M \hat{\alpha} + Z \hat{b})$, where
+$\hat{\alpha}$ and $\hat{\nu}$ are the joint minimizers
+of \eqref{eq:log-pickle} and $\hat{b} = b^*(\hat{\alpha}, \hat{\nu})$.
+Note that \eqref{eq:log-pickle-too} is a redefinition of $q(\alpha, \nu)$.
+Hereafter we will no longer use the definition \eqref{eq:log-pickle}.
+
+\subsection{A Key Concept}
+
+Introduce
+\begin{equation} \label{eq:key}
+   p(\alpha, b, \nu)
+   =
+   - l(a + M \alpha + Z b)
+   + \tfrac{1}{2} b^T D^{-1} b
+   + \tfrac{1}{2} \log
+   \det\bigl[ Z^T \widehat{W} Z D + I \bigr]
+\end{equation}
+where, as the left-hand side says, $\alpha$, $b$, and $\nu$ are all
+free variables and, as usual, $D$ is a function of $\nu$, although
+the notation does not indicate this.
+Since the terms that contain $b$ are the same in both \eqref{eq:foo}
+and \eqref{eq:key}, $b^*$ can also be defined at the result of
+minimizing \eqref{eq:key} considered
+as a function of $b$ for fixed $\alpha$ and $\nu$.
+Thus \eqref{eq:log-pickle-too} is a profile of \eqref{eq:key}
+and $(\hat{\alpha}, \hat{b}, \hat{\nu})$ is the joint minimizer
+of \eqref{eq:key}.
+
+Since $p(\alpha, b, \nu)$ is a much simpler function than $q(\alpha, \nu)$,
+the latter having no closed form expression and requiring an optimization
+as part of each evaluation, it is much simpler to find
+$(\hat{\alpha}, \hat{b}, \hat{\nu})$
+by minimizing the former rather than the latter.
+
+\subsection{A Digression on Partial Derivatives}
+
+Let $f(\alpha, b, \nu)$ be a scalar-valued function of three vector
+variables.  We write partial derivative vectors using subscripts:
+$f_\alpha(\alpha, b, \nu)$ denotes the vector of partial derivatives
+with respect to components of $\alpha$.  Our convention is that we take
+this to be a column vector.  Similarly for $f_b(\alpha, b, \nu)$.
+We also use this convention for partial derivatives with respect to
+single variables: $f_{\nu_k}(\alpha, b, \nu)$, which are, of course,
+scalars.  We use this convention for any scalar-valued function
+of any number of vector variables.
+
+We continue this convention for second partial derivatives:
+$f_{\alpha b}(\alpha, b, \nu)$ denotes the matrix of partial derivatives
+having $i, j$ component that is the (mixed) second partial derivative of
+$f$ with respect to $\alpha_i$ and $b_j$.  Thus the row dimension of
+$f_{\alpha b}(\alpha, b, \nu)$  is the dimension of $\alpha$,
+the column dimension is the dimension of $b$, and
+$f_{b \alpha}(\alpha, b, \nu)$  is the transpose of
+$f_{\alpha b}(\alpha, b, \nu)$.
+
+This convention allows easy indication of points at which partial derivatives
+are evaluated.  For example, $f_{\alpha b}(\alpha, b^*, \nu)$ indicates
+that $b^*$ is plugged in for $b$ in the expression for
+$f_{\alpha b}(\alpha, b, \nu)$.
+
+We also use this convention of subscripts denoting partial derivatives
+with vector-valued functions.
+If $f(\alpha, b, \nu)$ is a column-vector-valued function of vector
+variables, then $f_\alpha(\alpha, b, \nu)$ denotes the matrix of
+partial derivatives having $i, j$ component that is the partial derivative
+of the $i$-th component of $f_\alpha(\alpha, b, \nu)$ with respect to
+$\alpha_j$.
+Thus the row dimension of
+$f_{\alpha}(\alpha, b, \nu)$  is the dimension of
+$f(\alpha, b, \nu)$ and
+the column dimension is the dimension of $\alpha$.
+
+\subsection{First Derivatives}
+
+Start with \eqref{eq:key}.  Its derivatives are
+\begin{equation} \label{eq:p-alpha}
+   p_\alpha(\alpha, b, \nu)
+   =
+   - M^T \bigl[ y - \mu(a + M \alpha + Z b) \bigr]
+\end{equation}
+\begin{equation} \label{eq:p-c}
+   p_b(\alpha, b, \nu)
+   =
+   - Z^T \bigl[ y - \mu(a + M \alpha + Z b) \bigr] + D^{- 1} b
+\end{equation}
+and
+\begin{equation} \label{eq:p-theta}
+   p_{\nu_k}(\alpha, b, \nu)
+   =
+   - \tfrac{1}{2} b^T D^{- 1} E_k D^{- 1} b
+   + \tfrac{1}{2} \tr \Bigl(
+   \bigl[ Z^T \widehat{W} Z D + I \bigr]^{- 1}
+   Z^T \widehat{W} Z E_k
+   \Bigr)
+\end{equation}
+where
+\begin{equation} \label{eq:eek}
+   E_k = A_{\nu_k}(\nu)
+\end{equation}
+is the diagonal matrix whose components are equal to one
+if the corresponding components of $D$ are equal to $\nu_k$ by
+definition (rather than by accident when some other component of $\nu$
+also has the same value) and whose components are otherwise zero.
+The formula for the derivative of a matrix inverse
+comes from \citet[Chapter~15, Equation~8.15]{harville}.
+The formula for the derivative of the log of a determinant
+comes from \citet[Chapter~15, Equation~8.6]{harville}.
+
+The estimating equation for $b^*$ can be written
+\begin{equation} \label{eq:estimating-c-star}
+   p_b\bigl(\alpha, b^*, \nu\bigr) = 0
+\end{equation}
+and by the multivariate chain rule \citep[Theorem~8.15]{browder}
+we have
+\begin{equation} \label{eq:q-alpha}
+\begin{split}
+   q_\alpha(\alpha, \nu)
+   & =
+   p_\alpha(\alpha, b^*, \nu)
+   +
+   b^*_\alpha(\alpha, \nu)^T p_b(\alpha, b^*, \nu)
+   \\
+   & =
+   p_\alpha(\alpha, b^*, \nu)
+\end{split}
+\end{equation}
+by \eqref{eq:estimating-c-star}, and
+\begin{equation} \label{eq:q-theta}
+\begin{split}
+   q_{\nu_k}(\alpha, \nu)
+   & =
+   b^*_{\nu_k}(\alpha, \nu)^T
+   p_b(\alpha, b^*, \nu)
+   +
+   p_{\nu_k}(\alpha, b^*, \nu)
+   \\
+   & =
+   p_{\nu_k}(\alpha, b^*, \nu)
+\end{split}
+\end{equation}
+again by \eqref{eq:estimating-c-star}.
+
+\subsection{Second Derivatives} \label{sec:second}
+
+We will proceed in the opposite direction from the preceding section,
+calculating abstract derivatives before particular formulas for random
+effects aster models, because we need to see what work needs to be done
+before doing it (we may not need all second derivatives).
+
+By the multivariate chain rule \citep[Theorem~8.15]{browder}
+\begin{align*}
+   q_{\alpha \alpha}(\alpha, \nu)
+   & =
+   p_{\alpha \alpha}(\alpha, b^*, \nu)
+   +
+   p_{\alpha b}(\alpha, b^*, \nu) b^*_\alpha(\alpha, \nu)
+   \\
+   q_{\alpha \nu}(\alpha, \nu)
+   & =
+   p_{\alpha \nu}(\alpha, b^*, \nu)
+   +
+   p_{\alpha b}(\alpha, b^*, \nu) b^*_{\nu}(\alpha, \nu)
+   \\
+   q_{\nu \nu}(\alpha, \nu)
+   & =
+   p_{\nu \nu}(\alpha, b^*, \nu)
+   +
+   p_{\nu b}(\alpha, b^*, \nu) b^*_{\nu}(\alpha, \nu)
+\end{align*}
+The estimating equation \eqref{eq:estimating-c-star}
+defines $b^*$ implicitly.  Thus derivatives of $b^*$ are computed using
+the implicit function theorem \citep[Theorem~8.29]{browder}
+\begin{align}
+   b^*_\alpha(\alpha, \nu)
+   & =
+   -
+   p_{b b}(\alpha, b^*, \nu)^{-1} p_{b \alpha}(\alpha, b^*, \nu)
+   \label{eq:c-star-alpha-rewrite}
+   \\
+   b^*_{\nu}(\alpha, \nu)
+   & =
+   -
+   p_{b b}(\alpha, b^*, \nu)^{-1} p_{b \nu}(\alpha, b^*, \nu)
+   \label{eq:c-star-theta-rewrite}
+\end{align}
+This theorem requires that $p_{b b}(\alpha, b^*, \nu)$ be invertible,
+and we shall see below that it is.
+Then the second derivatives above can be rewritten
+\begin{align*}
+   q_{\alpha \alpha}(\alpha, \nu)
+   & =
+   p_{\alpha \alpha}(\alpha, b^*, \nu)
+   -
+   p_{\alpha b}(\alpha, b^*, \nu)
+   p_{b b}(\alpha, b^*, \nu)^{-1} p_{b \alpha}(\alpha, b^*, \nu)
+   \\
+   q_{\alpha \nu}(\alpha, \nu)
+   & =
+   p_{\alpha \nu}(\alpha, b^*, \nu)
+   -
+   p_{\alpha b}(\alpha, b^*, \nu)
+   p_{b b}(\alpha, b^*, \nu)^{-1} p_{b \nu}(\alpha, b^*, \nu)
+   \\
+   q_{\nu \nu}(\alpha, \nu)
+   & =
+   p_{\nu \nu}(\alpha, b^*, \nu)
+   -
+   p_{\nu b}(\alpha, b^*, \nu)
+   p_{b b}(\alpha, b^*, \nu)^{-1} p_{b \nu}(\alpha, b^*, \nu)
+\end{align*}
+a particularly simple and symmetric form.  If we combine all the parameters
+in one vector $\psi = (\alpha, \nu)$ and write $p(\psi, b)$ instead
+of $p(\alpha, b, \nu)$ we have
+\begin{equation} \label{eq:psi-psi}
+   q_{\psi \psi}(\psi)
+   =
+   p_{\psi \psi}(\psi, b^*)
+   -
+   p_{\psi b}\bigl(\psi, b^*\bigr)
+   p_{b b}\bigl(\psi, b^*\bigr)^{- 1}
+   p_{b \psi}\bigl(\psi, b^*\bigr)
+\end{equation}
+This form is familiar from the conditional variance formula
+for normal distributions if
+\begin{equation} \label{eq:fat}
+   \begin{pmatrix} \Sigma_{1 1} & \Sigma_{1 2}
+   \\ \Sigma_{2 1} & \Sigma_{2 2} \end{pmatrix}
+\end{equation}
+is the partitioned variance matrix of a partitioned normal random vector
+with components $X_1$ and $X_2$, then the variance matrix of the conditional
+distribution of $X_1$ given $X_2$ is
+\begin{equation} \label{eq:thin}
+   \Sigma_{1 1} - \Sigma_{1 2} \Sigma_{2 2}^{- 1} \Sigma_{2 1}
+\end{equation}
+assuming that $X_2$ is nondegenerate \citep[Theorem~2.5.1]{anderson}.
+Moreover, if the conditional distribution is degenerate, that is, if there
+exists a nonrandom vector $v$ such that $\var(v^T X_1 \mid X_2) = 0$, then
+$$
+   v^T X_1 = v^T \Sigma_{1 2} \Sigma_{2 2}^{- 1} X_2
+$$
+with probability one, assuming $X_1$ and $X_2$ have mean zero
+\citep[also by][Theorem~2.5.1]{anderson}, and the joint distribution
+of $X_1$ and $X_2$ is also degenerate.  Thus we conclude that if
+the (joint) Hessian matrix of $p$ is nonsingular, then so is the (joint)
+Hessian matrix of $q$ given by \eqref{eq:psi-psi}.
+
+The remaining work for this section is deriving the second derivatives
+of $p$ that we need (it has turned out that we need all of them)
+\begin{align*}
+   p_{\alpha \alpha}(\alpha, b, \nu)
+   & =
+   M^T W(a + M \alpha + Z b) M
+   \\
+   p_{\alpha b}(\alpha, b, \nu)
+   & =
+   M^T W(a + M \alpha + Z b) Z
+   \\
+   p_{b b}(\alpha, b, \nu)
+   & =
+   Z^T W(a + M \alpha + Z b) Z + D^{- 1}
+   \\
+   p_{\alpha \nu_k}(\alpha, b, \nu)
+   & =
+   0
+   \\
+   p_{b \nu_k}(\alpha, b, \nu)
+   & =
+   - D^{- 1} E_k D^{- 1} b
+   \\
+   p_{\nu_j \nu_k}(\alpha, b, \nu)
+   & =
+   b^T D^{- 1} E_j D^{- 1} E_k D^{- 1} b
+   \\
+   & \qquad
+   -
+   \tfrac{1}{2} \tr \Bigl(
+   \bigl[ Z^T \widehat{W} Z D + I \bigr]^{- 1}
+   Z^T \widehat{W} Z E_j
+   \\
+   & \qquad \qquad
+   \bigl[ Z^T \widehat{W} Z D + I \bigr]^{- 1}
+   Z^T \widehat{W} Z E_k
+   \Bigr)
+\end{align*}
+This finishes the derivation of all the derivatives we need.
+Recall that in our use of the implicit function theorem we needed
+$p_{b b}(\alpha, b^*, \nu)$ to be invertible.  From the explicit form
+given above we see that it is actually negative definite, because
+$W(a + M \alpha + Z b)$ is positive semidefinite by \eqref{eq:w}.
+
+\subsection{Zero Variance Components} \label{sec:zero}
+
+When some variance components are zero, the corresponding diagonal components
+of $D$ are zero, and the corresponding components of $b$ are zero almost surely.
+The order of the components of $b$ does not matter, so long as the rows of $Z$
+and the rows and columns of $D$ are reordered in the same way.  So suppose
+these objects are partitioned as
+$$
+   b = \begin{pmatrix} b_1 \\ b_2 \end{pmatrix}
+   \qquad
+   Z = \begin{pmatrix} Z_1 \\ Z_2 \end{pmatrix}
+   \qquad
+   D = \begin{pmatrix} D_1 & 0 \\ 0 & D_2 \end{pmatrix}
+$$
+where $D_2 = 0$ and the diagonal components of $D_1$ are all strictly positive,
+so the components of $b_2$ are all zero almost surely and the components of
+$b_1$ are all nonzero almost surely.  Since $Z b = Z_1 b_1$ almost
+surely, the value of $Z_2$ is irrelevant.
+In the expression for $D$ we are using the convention that $0$ denotes
+the zero matrix of the dimension needed for the expression it appears in to
+make sense, so the two appearances of 0 in the expression for $D$ as
+a partitioned matrix denote different submatrices having all components zero
+(they are transposes of each other).
+
+Then the correct expression for the complete data log likelihood is
+\begin{equation} \label{eq:foo-baz}
+   l_c(\alpha, b, \nu)
+   =
+   l(a + M \alpha + Z_1 b_1)
+   - \tfrac{1}{2} b_1^T D_1^{- 1} b_1
+   - \tfrac{1}{2} \log \det(D_1)
+\end{equation}
+that is, the same as \eqref{eq:foo} except with subscripts 1
+on $b$, $Z$, and $D$.  And this leads to the correct expression for
+the approximate log likelihood
+\begin{equation} \label{eq:log-pickle-too-baz}
+\begin{split}
+   q(\alpha, \nu)
+   & =
+   - l(a + M \alpha + Z_1 b_1^*)
+   + \tfrac{1}{2} (b_1^*)^T D_1^{-1} b_1^*
+   \\
+   & \qquad
+   + \tfrac{1}{2} \log
+   \det\bigl[ Z_1^T \widehat{W} Z_1 D_1 + I \bigr]
+\end{split}
+\end{equation}
+where again $I$ denotes the identity matrix of the appropriate dimension
+(which now must be the dimension of $D_1$ for the expression it appears
+in to make sense) and where $b_1^*$ denotes the maximizer of
+\eqref{eq:foo-baz} considered as a function of $b_1$ with $\alpha$ and $\nu$
+fixed, so it is actually a function of $\alpha$ and $\nu$ although the
+notation does not indicate this.
+Since
+\begin{align*}
+   Z^T \widehat{W} Z D + I
+   & =
+   \begin{pmatrix}
+   Z_1^T \widehat{W} Z_1 D_1 + I
+   &
+   Z_1^T \widehat{W} Z_2 D_2
+   \\
+   Z_2^T \widehat{W} Z_1 D_1
+   &
+   Z_2^T \widehat{W} Z_2 D_2 + I
+   \end{pmatrix}
+   \\
+   & =
+   \begin{pmatrix}
+   Z_1^T \widehat{W} Z_1 D_1 + I
+   &
+   0
+   \\
+   Z_2^T \widehat{W} Z_1 D_1
+   &
+   I
+   \end{pmatrix}
+\end{align*}
+where again we are using the convention that $I$ denotes the identity matrix
+of the appropriate dimension and 0 denotes the zero matrix of the appropriate
+dimension, so $I$ denotes different identity matrices in
+different parts of this equation, having the dimension of $D$ on the left-hand
+side, the dimension of $D_1$ in the first column of both partitioned matrices,
+and the dimension of $D_2$ in the second column of both partitioned matrices,
+\begin{align*}
+   \det(Z^T \widehat{W} Z D + I)
+   & =
+   \det(Z_1^T \widehat{W} Z_1 D_1 + I) \det(I)
+   \\
+   & =
+   \det(Z_1^T \widehat{W} Z_1 D_1 + I)
+\end{align*}
+by the rule that the determinant of a blockwise lower triangular
+partitioned matrix
+is the product of the determinants of the blocks on the diagonal
+\citep[Theorem~13.3.1]{harville}.  And since $Z_1 b_1 = Z b$ almost surely,
+\begin{equation} \label{eq:log-pickle-too-qux}
+\begin{split}
+   q(\alpha, \nu)
+   & =
+   - l(a + M \alpha + Z b^*)
+   + \tfrac{1}{2} (b_1^*)^T D_1^{-1} b_1^*
+   \\
+   & \qquad
+   + \tfrac{1}{2} \log
+   \det\bigl[ Z^T \widehat{W} Z D + I \bigr]
+\end{split}
+\end{equation}
+that is, the subscripts 1 are only needed in the term where the matrix inverse
+appears and are necessary there because $D^{- 1}$ does not exist.
+\citet[Section 2.3]{b+c} suggest using the Moore-Penrose pseudoinverse
+\citep[Chapter~20]{harville}
+$$
+   D^+ = \begin{pmatrix} D_1^{- 1} & 0 \\ 0 & 0 \end{pmatrix}
+$$
+which gives
+\begin{equation} \label{eq:log-pickle-too-too}
+   q(\alpha, \nu)
+   =
+   - l(a + M \alpha + Z b^*)
+   + \tfrac{1}{2} (b^*)^T D^+ b^*
+   + \tfrac{1}{2} \log
+   \det\bigl[ Z^T \widehat{W} Z D + I \bigr]
+\end{equation}
+for the approximate log likelihood.  This hides but does not eliminate
+the partitioning.  Although there is no explicit partitioning in
+\eqref{eq:log-pickle-too-too}, it is still there in the definition
+of $b^*$.
+
+Although this proposal \citep[Section 2.3]{b+c} does deal with the
+situation where the zero variance components are somehow known, it
+does not adequately deal with estimating which variance components are
+zero.  That is the subject of the following two sections.
+
+\subsection{The Theory of Constrained Optimization} \label{sec:raw}
+
+\subsubsection{Incorporating Constraints in the Objective Function}
+
+When zero variance components arise, optimization of \eqref{eq:key}
+puts us in the
+realm of constrained optimization.  The theory of constrained optimization
+\citep{raw} has a notational bias towards minimization \citep[p.~5]{raw}.
+One can, of course, straightforwardly translate every result in \citet{raw}
+from the context of minimization to the context of maximization, because
+for any objective function $f$, maximizing $f$ is the same as minimizing
+$- f$, and \citeauthor{raw} give infrequent hints and discussions of
+alternative terminology in aid of this.  But since the theory of
+constrained optimization is strange to most statisticians, especially
+the abstract theory that is needed here
+(Karush-Kuhn-Tucker theory is not helpful
+here, as we shall see), it is much simpler to switch from maximization to
+minimization so we can use all of the theory in \citet{raw} without
+modification.  And we have done so.
+
+The theory of constrained optimization incorporates constraints in the
+objective function by the simple device of defining the objective function
+(for a minimization problem) to have the value $+ \infty$ off the constraint
+set \citep[Section~1A]{raw}.
+Since no point where the objective function has the value $+ \infty$
+can minimize it, unless the the objective function has the value $+ \infty$
+everywhere, which is not the case in any application, the unconstrained
+minimizer of this sort of objective function is the same as the constrained
+minimizer.
+
+Thus we need to impose constraints on our key function
+\eqref{eq:key}, requiring that
+each component of $\nu$ be nonnegative and when any component of $\nu$ is
+zero the corresponding components of $b$ are also zero.  However,
+the formula \eqref{eq:key} does not make sense when components of $\nu$
+are zero, so we will have to proceed differently.
+
+\subsubsection{Lower Semicontinuous Regularization}
+
+Since all but the middle term on the right-hand side of
+\eqref{eq:key} are actually defined on some neighborhood of each point
+of the constraint set and differentiable at each point
+of the constraint set, we only need to deal with the middle term.
+It is the sum of terms of the form $b_i^2 / \nu_k$, where $\nu_k$ is
+the variance of $b_i$.  Thus we investigate functions of this form
+\begin{equation} \label{eq:h}
+   h(b, \nu)
+   =
+   b^2 / \nu
+\end{equation}
+where, temporarily, $b$ and $\nu$ are scalars rather than vectors
+(representing single components of the vectors).  In case $\nu > 0$
+we have derivatives
+\begin{align*}
+   h_b(b, \nu) & = 2 b / \nu
+   \\
+   h_\nu(b, \nu) & = - b^2 / \nu^2
+   \\
+   h_{b b}(b, \nu) & = 2 / \nu
+   \\
+   h_{b \nu}(b, \nu) & = - 2 b / \nu^2
+   \\
+   h_{\nu \nu}(b, \nu) & = 2 b^2 / \nu^3
+\end{align*}
+The Hessian matrix
+$$
+   h''(b, \nu)
+   =
+   \begin{pmatrix}
+   2 / \nu & - 2 b / \nu^2
+   \\
+   - 2 b / \nu^2 & 2 b^2 / \nu^3
+   \end{pmatrix}
+$$
+has nonnegative determinants of its principal submatrices, since the
+diagonal components are positive and $\det\bigl(h''(b, \nu)\bigr)$ is zero.
+Thus the Hessian matrix is nonnegative definite
+\citep[Theorem~14.9.11]{harville}, which implies that $h$ itself is
+convex \citep[Theorem~2.14]{raw} on the set where $\nu > 0$.
+
+We then extend $h$ to the whole of the constraint set (this just adds
+the origin to the points already considered) in two steps.
+First we define it to have the value $+ \infty$ at all points not
+yet considered (those where any component of $\nu$ is nonpositive).
+This gives us an extended-real-valued convex function defined on
+all of $\real^2$.
+Second we take it to be the
+lower semicontinuous (LSC) regularization \citep[p.~14]{raw} of the
+function just defined.
+The LSC regularization of a convex function is convex
+\citep[Proposition~2.32]{raw}.  For any sequences $b_n \to b \neq 0$
+and $\nu_n \searrow 0$ we have $h(b_n, \nu_n) \to \infty$.  Thus the LSC
+regularization has the value $+ \infty$ for $\nu = 0$ but $b \neq 0$.
+If $b_n = 0$ and $\nu_n \searrow 0$ we have $h(b_n, \nu_n) = 0$ for all
+$n$.  Since $h(b, \nu) \ge 0$ for all $b$ and $\nu \ge 0$, we conclude
+$$
+   \liminf_{\substack{b \to 0\\\nu \searrow 0}} h(b, \nu) = 0
+$$
+Thus the LSC regularization has the value 0 for $b = \nu = 0$.
+In summary
+\begin{equation} \label{eq:h-lsc}
+   h(b, \nu)
+   =
+   \begin{cases}
+   b^2 / \nu, & \nu > 0
+   \\
+   0, & \nu = 0 \opand b = 0
+   \\
+   + \infty, & \text{otherwise}
+   \end{cases}
+\end{equation}
+is an LSC convex function, which agrees with our original definition in
+case $\nu > 0$.  Note that $h(b, 0)$ considered as a function of $b$
+is minimized at $b = 0$ because that is the only point where this function
+is finite.
+
+Let $k$ denote the map from indices for $b$ to indices for $\nu$ that gives
+corresponding components: $\nu_{k(i)}$ is the variance of $b_i$.
+Let $\dim(b)$ denote the number of random effects.  Then our objective function
+can be written
+\begin{equation} \label{eq:key-lsc}
+   p(\alpha, b, \nu)
+   =
+   - l(a + M \alpha + Z b)
+   + \tfrac{1}{2} \sum_{i = 1}^{\dim(b)} h(b_i, \nu_{k(i)})
+   + \tfrac{1}{2} \log
+   \det\bigl[ Z^T \widehat{W} Z D + I \bigr]
+\end{equation}
+where $h$ is given by \eqref{eq:h-lsc}, provided all of the components of
+$\nu$ are nonnegative.  The proviso is necessary because the third term
+on the right-hand side is not defined for all values of $\nu$, only those
+such that the argument of the determinant is a positive definite matrix.
+Hence, we must separately define $p(\alpha, b, \nu) = + \infty$
+whenever any component of $\nu$ is negative.
+
+\subsubsection{Subderivatives}
+
+In calculus we learn that the first derivative is zero at a local minimum
+and, therefore, to check points where the first derivative is zero.
+This is called Fermat's rule.  This
+rule no longer works for nonsmooth functions, including those that incorporate
+constraints, such as \eqref{eq:key-lsc}.  It does, of course, still work
+at points in the interior of the constraint set where \eqref{eq:key-lsc}
+is differentiable.  It does not work to check points on the boundary.
+There we need what \citet[Theorem~10.1]{raw}
+call \emph{Fermat's rule, generalized:} at a local minimum the
+\emph{subderivative function} is nonnegative.
+
+For any extended-real-valued function $f$ on $\real^d$,
+the \emph{subderivative function}, denoted $d f(x)$
+is also an extended-real-valued function on $\real^d$ defined by
+$$
+   d f(x)(\bar{w}) = \liminf_{\substack{\tau \searrow 0 \\ w \to \bar{w}}}
+   \frac{f(x + \tau w) - f(x)}{\tau}
+$$
+\citep[Definition~8.1]{raw}.  The notation on the left-hand side is read
+the subderivative of $f$ at the point $x$ in the direction $\bar{w}$.
+Fortunately, we do not have to use this
+definition to calculate subderivatives we want, because the calculus
+of subderivatives allows us to use simpler formulas in special cases.
+Firstly, there is the notion of subdifferential regularity
+\citep[Definition~7.25]{raw}, which we can use without knowing the definition.
+The sum of regular functions is regular and the subderivative of a sum
+is the sum of the subderivatives \citep[Corollary~10.9]{raw}.
+A smooth function is regular and the subderivative is given by
+\begin{equation} \label{eq:subderivative-smooth}
+   d f(x)(w) = w^T f'(x),
+\end{equation}
+where, as in Sections~\ref{sec:complete} and~\ref{sec:laplace} above,
+$f'(x)$ denotes the gradient vector (the vector of partial derivatives)
+of $f$ at the point $x$ \citep[Exercise~8.20]{raw}.  Every LSC convex function
+is regular \citep[Example~7.27]{raw}.  Thus in computing subderivatives
+of \eqref{eq:key-lsc} we may compute them term by term, and for the
+first and last terms, they are given in terms of the partial derivatives
+already computed by \eqref{eq:subderivative-smooth}.
+For an LSC convex function $f$, we have the following characterization
+of the subderivative \citep[Proposition~8.21]{raw}.  At any point $x$
+where $f(x)$ is finite, the limit
+$$
+   g(w) = \lim_{\tau \searrow 0} \frac{f(x + \tau w) - f(x)}{\tau}
+$$
+exists and defines a sublinear function $g$, and then $d f(x)$
+is the LSC regularization of $g$.
+An extended-real-valued
+function $g$ is \emph{sublinear} if $g(0) = 0$ and
+$$
+   g(a_1 x_1 + a_2 x_2) \le a_1 g(x_1) + a_2 g(x_2)
+$$
+for all vectors $x_1$ and $x_2$ and positive scalars $a_1$ and $a_2$
+\citep[Definition~3.18]{raw}.
+The subderivative function of every regular LSC function
+is sublinear \citep[Theorem~7.26]{raw}.
+
+So let us proceed to calculate the subderivative of \eqref{eq:h-lsc}.
+In the interior of the constraint set, where this function is smooth,
+we can use the partial derivatives already calculated
+$$
+   d h(b, \nu)(u, v) = \frac{2 b u}{\nu} - \frac{b^2 v}{\nu^2}
+$$
+where the notation on the left-hand side means the subderivative of $h$
+at the point $(b, \nu)$ in the direction $(u, v)$.
+On the boundary of the constraint set, which consists of the single point
+$(0, 0)$, we take limits.  In case $v > 0$, we have
+$$
+   \lim_{\tau \searrow 0}
+   \frac{h(\tau u, \tau v) - h(0, 0)}{\tau}
+   =
+   \lim_{\tau \searrow 0}
+   \frac{\tau^2 u^2 / (\tau v)}{\tau}
+   =
+   \lim_{\tau \searrow 0}
+   \frac{u^2}{v}
+   =
+   \frac{u^2}{v}
+$$
+In case $v \le 0$ and $u \neq 0$, we have
+$$
+   \lim_{\tau \searrow 0}
+   \frac{h(\tau u, \tau v) - h(0, 0)}{\tau}
+   =
+   \lim_{\tau \searrow 0} (+ \infty)
+   =
+   + \infty
+$$
+In case $v = 0$ and $u = 0$, we have
+$$
+   \lim_{\tau \searrow 0}
+   \frac{h(\tau u, \tau v) - h(0, 0)}{\tau}
+   =
+   0
+$$
+Thus if we define
+$$
+   g(u, v) = \begin{cases} u^2 / v, & v > 0 \\ 0, & u = v = 0 \\ + \infty,
+   & \text{otherwise} \end{cases}
+$$
+The theorem says $d h(0, 0)$ is the LSC regularization of $g$.
+But we recognize $g = h$, so $g$ is already LSC, and we have
+$$
+   d h(0, 0)(u, v) = h(u, v)
+$$
+
+\subsubsection{Applying the Generalization of Fermat's Rule}
+
+The theory of constrained optimization tells us nothing we did not already
+know (from Fermat's rule) about smooth functions.  The only way we can
+have $d f(x)(w) = w^T f'(x) \ge 0$ for all vectors $w$ is if $f'(x) = 0$.
+It is only at points where the function is nonsmooth, in the cases of
+interest to us, points on the boundary of the constraint set, where
+the theory of constrained optimization tells us things we did not know and
+need to know.
+
+Even on the boundary, the conclusions of the theory about components
+of the state that are not on the boundary agree with what we already knew.
+We have
+$$
+   d p(\alpha, b, \nu)(s, u, v)
+   =
+   s^T p_\alpha(\alpha, b, \nu)
+   +
+   \text{terms not containing $s$}
+$$
+and the only way this can be nonnegative for all $s$ is if
+\begin{equation} \label{eq:descent-alpha}
+   p_\alpha(\alpha, b, \nu) = 0
+\end{equation}
+in which case
+$d p(\alpha, b, \nu)(s, u, v)$ is a constant function of $s$, or, what
+is the same thing in other words, the terms of
+$d p(\alpha, b, \nu)(s, u, v)$ that appear to involve $s$ are all zero
+(and so do not actually involve $s$).
+
+Similarly, $d p(\alpha, b, \nu)(s, u, v) \ge 0$ for all $u_i$ and $v_j$
+such that $\nu_j > 0$ and $k(i) = j$ only if
+\begin{equation} \label{eq:descent-other-smooth}
+\begin{split}
+   p_{\nu_j}(\alpha, b, \nu) & = 0, \qquad \text{$j$ such that $\nu_j > 0$}
+   \\
+   p_{b_i}(\alpha, b, \nu) & = 0, \qquad \text{$i$ such that $\nu_{k(i)} > 0$}
+\end{split}
+\end{equation}
+in which case we conclude that
+$d p(\alpha, b, \nu)(s, u, v)$ is a constant function of such $u_i$ and $v_j$.
+
+Thus, assuming that we are at a point $(\alpha, b, \nu$)
+where \eqref{eq:descent-alpha}
+and \eqref{eq:descent-other-smooth} hold,
+and we do assume this throughout the rest of this section,
+$d p(\alpha, b, \nu)(s, u, v)$ actually involves only $v_j$ and $u_i$ such
+that $\nu_j = 0$ and $k(i) = j$.  Define
+\begin{equation} \label{eq:key-smooth}
+   \bar{p}(\alpha, b, \nu)
+   =
+   - l(a + M \alpha + Z b)
+   + \tfrac{1}{2} \log
+   \det\bigl[ Z^T \widehat{W} Z D + I \bigr]
+\end{equation}
+(the part of \eqref{eq:key-lsc} consisting of the smooth terms).
+Then
+\begin{equation} \label{eq:descent-other-nonsmooth}
+\begin{split}
+   d p(\alpha, b, \nu)(s, u, v)
+   & =
+   \sum_{j \in J}
+   \Biggl[
+   v_j \bar{p}_{\nu_j}(\alpha, b, \nu)
+   \\
+   & \qquad
+   +
+   \sum_{i \in k^{- 1}(j)}
+   \Biggl(
+   u_i \bar{p}_{b_i}(\alpha, b, \nu)
+   +
+   h(u_i, v_j)
+   \Biggr)
+   \Biggr]
+\end{split}
+\end{equation}
+where $J$ is the set of $j$ such that $\nu_j = 0$,
+where $k^{- 1}(j)$ denotes the set of $i$ such that $k(i) = j$,
+and where $h$ is defined by \eqref{eq:h-lsc}.
+Fermat's rule generalized says we must consider all of the terms
+of \eqref{eq:descent-other-nonsmooth} together.
+We cannot consider partial derivatives, because the partial derivatives
+do not exist.  To check that we are at a local minimum we need to show
+that \eqref{eq:descent-other-nonsmooth} is nonnegative
+for all vectors $u$ and $v$.
+Conversely, to verify that we are not at a local minimum, we need to find
+one pair of vectors $u$ and $v$ such that \eqref{eq:descent-other-nonsmooth}
+is negative.  Such a pair $(u, v)$ we call a \emph{descent direction}.
+Since Fermat's rule generalized is a necessary but not sufficient condition
+(like the ordinary Fermat's rule), the check that we are at a local minimum
+is not definitive, but the check that we are not is.  If a descent direction
+is found, then moving in that direction away from
+the current value of $(\alpha, b, \nu)$ will decrease the objective
+function \eqref{eq:key-lsc}.
+
+So how do we find a descent direction?  We want to minimize
+\eqref{eq:descent-other-nonsmooth} considered as a function of $u$ and $v$
+for fixed $\alpha$, $b$, and $\nu$.
+On further consideration, we can consider the terms of
+\eqref{eq:descent-other-nonsmooth} for each $j$ separately.
+If the minimum of
+\begin{equation} \label{eq:descent-other-nonsmooth-j}
+   v_j \bar{p}_{\nu_j}(\alpha, b, \nu)
+   +
+   \sum_{i \in k^{- 1}(j)}
+   \Biggl(
+   u_i \bar{p}_{b_i}(\alpha, b, \nu)
+   +
+   h(u_i, v_j)
+   \Biggr)
+\end{equation}
+over all vectors $u$ and $v$ is nonnegative, then the minimum is zero,
+because \eqref{eq:descent-other-nonsmooth-j} has the value zero
+when $u = 0$ and $v = 0$.  Thus we can ignore this $j$ in calculating
+the descent direction.
+
+On the other hand, if the minimum is negative,
+then the minimum does not occur at $v = 0$ and the minimum is actually
+$- \infty$ by the sublinearity of the subderivative,
+one consequence of sublinearity being positive homogeneity
+$$
+   d f(x)(\tau w) = \tau d f(x)(w), \qquad \tau \ge 0
+$$
+which holds for
+for any subderivative.  Thus (as our terminology hints) we are only trying
+to find a descent \emph{direction}, the length of the vector $(u, v)$ does
+not matter, only its direction.  Thus to get a finite minimum we can
+do a constrained minimization of \eqref{eq:descent-other-nonsmooth-j},
+constraining $(u, v)$ to lie in a ball.  This is found by the well-known
+Karush-Kuhn-Tucker theory of constrained optimization to be the minimum
+of the Lagrangian function
+\begin{equation} \label{eq:laggard}
+   L(u, v)
+   =
+   \lambda v_j^2
+   +
+   v_j \bar{p}_{\nu_j}(\alpha, b, \nu)
+   +
+   \sum_{i \in k^{- 1}(j)}
+   \Biggl(
+   \lambda
+   u_i^2
+   +
+   u_i \bar{p}_{b_i}(\alpha, b, \nu)
+   +
+   \frac{u_i^2}{v_j}
+   \Biggr)
+\end{equation}
+where $\lambda > 0$ is the Lagrange multiplier, which would have to be
+adjusted if we were interested in constraining $(u, v)$ to lie in a particular
+ball.  Since we do not care about the length of $(u, v)$ we can use any
+$\lambda$.  We have replaced $h(u_i, v_i)$ by $u_i^2 / v_j$ because we
+know that if we are finding an actual descent direction, then we will
+have $v_j > 0$. Now
+\begin{align*}
+   L_{u_i}(u, v)
+   & =
+   2 \lambda u_i
+   +
+   \bar{p}_{b_i}(\alpha, b, \nu)
+   +
+   \frac{2 u_i}{v_j},
+   \qquad
+   i \in k^{- 1}(j)
+   \\
+   L_{v_j}(u, v)
+   & =
+   2 \lambda v_j
+   +
+   \bar{p}_{\nu_j}(\alpha, b, \nu)
+   -
+   \sum_{i \in k^{- 1}(j)}
+   \frac{u_i^2}{v_j^2}
+\end{align*}
+The minimum occurs where these are zero.
+Setting the first equal to zero and solving for $u_i$ gives
+$$
+   \hat{u}_i(v_j)
+   =
+   - \frac{\bar{p}_{b_i}(\alpha, b, \nu)}{2 (\lambda + 1 / v_j)}
+$$
+plugging this back into the second gives
+\begin{align*}
+   L_{v_j}\bigl(\hat{u}(v), v\bigr)
+   & =
+   2 \lambda v_j
+   +
+   \bar{p}_{\nu_j}(\alpha, b, \nu)
+   -
+   \frac{1}{4 (\lambda v_j + 1)^2}
+   \sum_{i \in k^{- 1}(j)}
+   \bar{p}_{b_i}(\alpha, b, \nu)^2
+\end{align*}
+and we seek zeros of this.  The right-hand is clearly an increasing
+function of $v_j$ so it is negative somewhere only if it is negative when
+$v_j = 0$ where it has the value
+\begin{equation} \label{eq:descent-test}
+   \bar{p}_{\nu_j}(\alpha, b, \nu)
+   -
+   \frac{1}{4}
+   \sum_{i \in k^{- 1}(j)}
+   \bar{p}_{b_i}(\alpha, b, \nu)^2
+\end{equation}
+So that gives us a test for a descent direction: we have a descent
+direction if and only if \eqref{eq:descent-test} is negative.
+Conversely, we appear to have $\hat{\nu}_j = 0$ if \eqref{eq:descent-test}
+is nonnegative.
+
+That finishes our treatment of the theory of constrained optimization.
+We have to ask is all of this complication really necessary?
+It turns out that it is and it isn't.  We can partially avoid it
+by a change of variables.  But the cure is worse than the disease
+in some ways.  This is presented in the following section.
+
+\subsection{Square Roots} \label{sec:roots}
+
+We can avoid constrained optimization by the following change of parameter.
+Introduce new parameter variables by
+\begin{align*}
+   \nu_j & = \sigma_j^2
+   \\
+   b & = A c
+\end{align*}
+where $A$ is diagonal and $A^2 = D$, so the $i$-th diagonal component of
+$A$ is $\sigma_{k(i)}$.
+Then the objective function \eqref{eq:key} becomes
+\begin{equation} \label{eq:key-rooted}
+   \tilde{p}(\alpha, c, \sigma)
+   =
+   - l(a + M \alpha + Z A c)
+   + \tfrac{1}{2} c^T c
+   + \tfrac{1}{2} \log
+   \det\bigl[ Z^T \widehat{W} Z A^2 + I \bigr]
+\end{equation}
+There are now no constraints and \eqref{eq:key-rooted} is a continuous
+function of all variables.
+
+The drawback is that by symmetry we must have
+$\tilde{p}_{\sigma_j}(\alpha, c, \sigma)$ equal to zero when $\sigma_j = 0$.
+Thus first derivatives become useless for checking for descent directions,
+and second derivative information is necessary.
+However, that is not the way unconstrained optimizers like the R functions
+\texttt{optim} and \texttt{nlminb} work.  They do not expect such pathological
+behavior and do not deal with it correctly.  If we want to use such optimizers
+to find local minima of \eqref{eq:key-rooted}, then we must provide starting
+points that have no component of $\nu$ equal to zero,
+and hope that the optimizer will never get any component of $\nu$ close to
+zero unless zero actually is a solution.  But this is only a hope.
+The theory that guided the design of these optimizers does not provide
+any guarantees for this kind of objective function.
+
+Moreover, optimizer algorithms stop when close to but not exactly
+at a solution, a consequence of inexactness of computer arithmetic.
+Thus when the optimizer stops and declares convergence with one or more
+components of $\nu$ close to zero, how do we know whether the true solution
+is exactly zero or not?  We don't unless we return to the original
+parameterization and apply the theory of the preceding section.
+The question of whether the MLE of the variance components are exactly
+zero or not is of scientific interest, so it seems that the device of this
+section does not entirely avoid the theory of constrained optimization.
+We must change back to the original parameters and use \eqref{eq:descent-test}
+to determine whether or not we have $\nu_j = 0$.
+
+Finally, there is another issue with this ``square root'' parameterization.
+The analogs of the second derivative formulas derived
+in Section~\ref{sec:second} above, for this new parameterization are
+extraordinarily ill-behaved.  The Hessian matrices are badly conditioned
+and sometimes turn out to be not positive definite when calculated by
+the computer's arithmetic (which is inexact) even though theory says
+they must be positive definite.  We know this because at one point we
+thought that this ``square root'' parameterization was the answer to
+everything and tried to use it everywhere.  Months of frustration ensued
+where it mostly worked, but failed on a few problems.  It took us a long
+time to see that it is fundamentally wrong-headed.  As we said above,
+the cure is worse than the disease.
+
+Thus we concluded that, while we may use this ``square root'' parameterization
+to do unconstrained rather than constrained minimization,
+we should only use it only for that.
+The test \eqref{eq:descent-test} should be used to determine whether
+variance components are exactly zero or not, and the formulas in
+Section~\ref{sec:second} should be used to derive Fisher information.
+
+\subsubsection{First Derivatives}
+
+Some of R's optimization routines can use first derivative information,
+thus we derive first derivatives in this parameterization.
+\begin{align}
+   \tilde{p}_\alpha(\alpha, c, \sigma)
+   & =
+   - M^T [ y - \mu(a + M \alpha + Z A c) ]
+   \label{eq:key-rooted-alpha}
+   \\
+   \tilde{p}_c(\alpha, c, \sigma)
+   & =
+   - A Z^T [ y - \mu(a + M \alpha + Z A c) ]
+   + c
+   \label{eq:key-rooted-c}
+   \\
+   \tilde{p}_{\sigma_j}(\alpha, c, \sigma)
+   & =
+   - c^T E_j Z^T [ y - \mu(a + M \alpha + Z A c) ]
+   \nonumber
+   \\
+   & \qquad
+   +
+   \tr\left( [ Z^T \widehat{W} Z A^2 + I \bigr]^{- 1}
+   Z^T \widehat{W} Z A E_j
+   \right)
+   \label{eq:key-rooted-sigma}
+\end{align}
+where $E_j$ is given by \eqref{eq:eek}.
+
+\subsection{Fisher Information} \label{sec:fisher}
+
+The observed Fisher information matrix is minus the second derivative matrix
+of the log likelihood.  As we said above, we want to do this in the original
+parameterization.
+
+Assembling stuff derived in preceding sections and introducing
+\begin{align*}
+   \mu^*
+   & =
+   \mu\bigl(a + M \alpha + Z b^*(\alpha, \nu) \bigr)
+   \\
+   W^*
+   & =
+   W\bigl(a + M \alpha + Z b^*(\alpha, \nu) \bigr)
+   \\
+   H^* & = Z^T W^* Z + D^{- 1}
+   \\
+   \widehat{H} & = Z^T \widehat{W} Z D + I
+\end{align*}
+we obtain
+\begin{align*}
+   q_{\alpha \alpha}(\alpha, \nu)
+   & =
+   M^T W^* M - M^T W^* Z (H^*)^{- 1} Z^T W^* M
+   \\
+   q_{\alpha \nu_j}(\alpha, \nu)
+   & =
+   M^T W^* Z (H^*)^{- 1} D^{- 1} E_j D^{-1} b^*
+   \\
+   q_{\nu_j \nu_k}(\alpha, \nu)
+   & =
+   (b^*)^T D^{- 1} E_j D^{- 1} E_k D^{- 1} b^*
+   \\
+   & \qquad
+   -
+   \tfrac{1}{2} \tr \Bigl( \widehat{H}^{- 1} Z^T \widehat{W} Z E_j
+   \widehat{H}^{- 1} Z^T \widehat{W} Z E_k \Bigr)
+   \\
+   & \qquad
+   -
+   (b^*)^T D^{- 1} E_j D^{- 1}
+   (H^*)^{- 1}
+   D^{- 1} E_k D^{- 1} b^*
+\end{align*}
+In all of these $b^*$, $\mu^*$, $W^*$, and $H^*$ are functions of $\alpha$
+and $\nu$ even though the notation does not indicate this.
+
+It is tempting to think expected Fisher information simplifies things
+because we ``know'' $E(y) = \mu$ and $\var(y) = W$, except we don't know
+that!  What we do know is
+$$
+   E(y \mid b) = \mu(a + M \alpha + Z b)
+$$
+but we don't know how to take the expectation of the right hand side
+(and similarly for the variance).  Rather than introduce further approximations
+of dubious validity, it seems best to just use (approximate)
+observed Fisher information.
+
+\subsection{Standard Errors for Random Effects}
+
+Suppose that the approximate Fisher information derived
+in Section~\ref{sec:fisher} can be used to give an approximate
+asymptotic variance for the parameter vector $\psi = (\alpha, \nu)$.
+This estimate of the asymptotic variance is $q_{\psi \psi}(\hat{\psi})^{- 1}$,
+where $q_{\psi \psi}(\psi)$ is given by \eqref{eq:psi-psi} and
+$\hat{\psi} = (\hat{\alpha}, \hat{\nu})$.
+
+To apply the delta method to get asymptotic standard errors for
+$\hat{b}$ we need the derivatives
+\eqref{eq:c-star-alpha-rewrite} and \eqref{eq:c-star-theta-rewrite}.
+Stacking these we obtain
+$$
+   b^*_\psi(\hat{\psi})
+   =
+   \begin{pmatrix}
+   -
+   p_{b b}(\hat{\alpha}, \hat{b}, \hat{\nu})^{-1}
+   p_{b \alpha}(\hat{\alpha}, \hat{b}, \hat{\nu})
+   \\
+   -
+   p_{b b}(\hat{\alpha}, \hat{b}, \hat{\nu})^{-1}
+   p_{b \nu}(\hat{\alpha}, \hat{b}, \hat{\nu})
+   \end{pmatrix}
+$$
+and the delta method gives
+\begin{equation} \label{eq:b-ass-var}
+   b^*_\psi(\hat{\psi})^T q_{\psi, \psi}(\hat{\psi})^{- 1}
+   b^*_\psi(\hat{\psi})
+\end{equation}
+for the asymptotic variance of the estimator $\hat{b}$.
+
+It must be conceded that in this section
+we are living what true believers in random effects
+models would consider a state of sin.  The random effects
+vector $b$ is not a parameter, yet $b^*(\hat{\psi})$ treats it
+as a function of parameters (which is thus a parameter) and the
+``asymptotic variance'' \eqref{eq:b-ass-var} is derived by considering
+$\hat{b}$ just such a parameter estimate.  So \eqref{eq:b-ass-var} is
+correct in what it does, so long as we buy the assumption that
+$q_{\psi \psi}(\hat{\psi})$ is approximate Fisher information
+for $\psi$, but it fails to treat random effects as actually random.
+Since any attempt to actually treat random effects as random would lead
+us to integrals that we cannot do, we leave the subject at this point.
+The asymptotic variance \eqref{eq:b-ass-var} may be philosophically
+incorrect in some circles, but it seems to be the best we can do.
+
+\subsection{REML?}
+
+\citet{b+c} do not maximize the approximate log likelihood
+\eqref{eq:log-pickle}, but make further
+approximations to give estimators motivated by REML (restricted maximum
+likelihood) estimators for linear mixed models (LMM).
+\citet{b+c} concede that
+the argument that justifies REML estimators for LMM does not carry over to
+their REML-like estimators for generalized linear mixed models (GLMM).
+Hence these REML-like estimators have no mathematical justification.
+Even in LMM the widely used procedure of following REML estimates of the
+variance components with so-called BLUE estimates of fixed effects and BLUP
+estimates of random effects, which are actually only BLUE and BLUP if the
+variance components are assumed known rather than estimated, is obviously
+wrong: ignoring the fact that the variance components are estimated cannot be
+justified (and \citeauthor{b+c} say this in their discussion section).
+Hence REML is not justified even in LMM when fixed effects
+are the parameters of interest.  In aster models, because components of the
+response vector are dependent and have distributions in different families,
+it is very unclear what REML-like estimators in the style of \citet{b+c}
+might be.  The analogy just breaks down.
+Hence, we do not pursue this REML analogy and stick with what we have
+described above.
+
+\section{Practice} \label{sec:reaster}
+
+Our goal is to minimize \eqref{eq:log-pickle}.
+We replace \eqref{eq:log-pickle} with \eqref{eq:log-pickle-too}
+in some steps because of our inability to differentiate \eqref{eq:log-pickle},
+but our whole procedure must minimize \eqref{eq:log-pickle}.
+
+\subsection{Step 1}
+
+To get close to $(\hat{\alpha}, \hat{c}, \hat{\sigma})$ starting from far away
+we minimize
+\begin{equation} \label{eq:r}
+\begin{split}
+   r(\sigma)
+   & =
+   - l(a + M \tilde{\alpha} + Z A \tilde{c})
+   + \tfrac{1}{2} \tilde{c}^T \tilde{c}
+   \\
+   & \qquad
+   + \tfrac{1}{2} \log
+   \det\bigl[ Z^T W(a + M \tilde{\alpha} + Z A \tilde{c}) Z A^2 + I \bigr]
+\end{split}
+\end{equation}
+where $\tilde{\alpha}$ and $\tilde{c}$ are the joint minimizers of
+\eqref{eq:key-rooted} considered as a function of $\alpha$ and $c$ for
+fixed $\sigma$.  In \eqref{eq:r}, $\tilde{\alpha}$, $\tilde{c}$, and $A$
+are all functions of $\sigma$ although the notation does not indicate
+this.
+
+Because we cannot calculate derivatives of \eqref{eq:r}
+we minimize using by the R function \texttt{optim}
+with \texttt{method = "Nelder-Mead"}, the so-called Nelder-Mead simplex
+algorithm, a no-derivative method nonlinear optimization,
+not to be confused with the simplex algorithm
+for linear programming.
+
+\subsection{Step 2}
+
+Having found $\alpha$, $c$, and $\sigma$ close to the MLE values
+via the preceding step, we then switch to minimization of
+\eqref{eq:key-rooted} for which we have the derivative formulas
+\eqref{eq:key-rooted-alpha}, \eqref{eq:key-rooted-c},
+and \eqref{eq:key-rooted-sigma}.
+In this step we can use one of R's optimization functions that uses
+first derivative information: \texttt{nlm} or \texttt{nlminb} or
+\texttt{optim} with optional argument \texttt{method = "BFGS"}
+or \texttt{method = "CG"} or \texttt{method = "L-BFGS-B"}.
+
+To define \eqref{eq:key-rooted} we also need a $\widehat{W}$, and we take the
+value at the current values of $\alpha$, $c$, and $\sigma$.
+Because $W$ is typically a very large matrix ($n \times n$, where $n$
+is the number of nodes in complete aster graph, the number of nodes
+in the subgraph for a single individual times the number of individuals),
+we actually store $Z^T \widehat{W} Z$, which is only $r \times r$, where
+$r$ is the number of random effects.  We set
+\begin{equation} \label{eq:zwz}
+   Z^T \widehat{W} Z
+   =
+   Z^T W(a + M \alpha + Z A c) Z
+\end{equation}
+where $\alpha$, $c$, and $A = A(\sigma)$ are the current values before
+we start minimizing $\tilde{p}(\alpha, c, \sigma)$ and this value of
+$Z^T \widehat{W} Z$ is fixed throughout the minimization,
+as is required by the definition of $\tilde{p}(\alpha, c, \sigma)$.
+
+Having minimized $\tilde{p}(\alpha, c, \sigma)$ we are still not done, because
+now \eqref{eq:zwz} is wrong.  We held it fixed at the values of
+$\alpha$, $c$, and $\sigma$ we had before the minimization, and now
+those values have changed.  Thus we should re-evaluate \eqref{eq:zwz}
+and re-minimize, and continue doing this until convergence.
+
+We terminate this iteration when $\sigma$ values do not change
+(to within some prespecified tolerance) because the $\alpha$ and $c$
+values are, in theory, determined by $\sigma$, because $\tilde{p}$
+considered as a function of $\alpha$ and $c$ for fixed $\sigma$ is
+convex and hence has at most one local minimizer,
+so we do not need to worry about them converging.
+
+When this iteration terminates we are done with this step, and we have
+our point estimates $\hat{\alpha}$, $\hat{c}$, and $\hat{\sigma}$.
+We also have our point estimates $\hat{b}$ of the random effects
+on the original scale given by $A(\hat{\nu}) \hat{c}$
+and our point estimates $\nu_j = \sigma_j^2$ of the variance components.
+
+\subsection{Step 3}
+
+Having converted back to the original parameters, if any of the $\nu_j$
+are close to zero we use the check \eqref{eq:descent-test} to determine
+whether or not they are exactly zero.
+
+\subsection{To Do}
+
+A few issues that have not been settled.  Points~1 and~2 in the following
+list are not specific to random effects models.  They arise in fixed effect
+aster models too, even in generalized linear models and log-linear models
+in categorical data analysis.
+\begin{enumerate}
+\item Verify no directions of recession of fixed-effects-only model.
+\item Verify supposedly nested models are actually nested.
+\item How about constrained optimization and hypothesis tests of
+    variance components being zero?  How does the software automagically
+    or educationally do the right thing?  That is, do we just do the
+    Right Thing or somehow explain to lusers what the Right Thing is?
+\end{enumerate}
+
+\appendix
+
+\section{Cholesky}
+
+How do we calculate log determinants and derivatives thereof?
+R has a function \texttt{determinant} that calculates the log determinant.
+It uses $L U$ decomposition.
+
+An alternative method is to use Cholesky decomposition, but that only works
+when the given matrix is symmetric.  This may be better because there
+is a sparse version (the \texttt{chol} function in the \texttt{Matrix}
+package) that may enable us to do much larger problems (perhaps after some
+other issues getting in the way of scaling are also fixed).
+
+We need to calculate the log determinant that appears in \eqref{eq:key}
+or \eqref{eq:key-rooted}, but the matrix is not symmetric.
+It can, however, be rewritten so as to be symmetric.
+Assuming $A$ is invertible \begin{align*}
+   \det\bigl( Z^T \widehat{W} Z A^2 + I \bigr)
+   & =
+   \det\bigl( Z^T \widehat{W} Z A + A^{- 1} \bigr)
+   \det\bigl( A \bigr)
+   \\
+   & =
+   \det\bigl( A Z^T \widehat{W} Z A + I \bigr)
+\end{align*}
+If $A$ is singular, we can see by continuity
+that the two sides must agree there too.
+That takes care of \eqref{eq:key-rooted}.
+The same trick works for \eqref{eq:key}; just replace $A$ by
+$D^{1 / 2}$, which is the diagonal matrix whose diagonal components
+are the nonnegative square roots of the corresponding diagonal
+components of $D$.
+
+Cholesky can also be used to efficiently calculate matrix inverses
+(done by the \texttt{chol2inv} function in the \texttt{Matrix} package).
+So we investigate whether we can use Cholesky to calculate derivatives.
+
+\subsection{First Derivatives}
+
+For the trace in the formula \eqref{eq:key-rooted-sigma}
+for $\tilde{p}_{\sigma_j}(\alpha, c, \sigma)$
+we have in case $A$ is invertible
+\begin{multline*}
+   \tr\left(
+   [ Z^T \widehat{W} Z A^2 + I \bigr]^{- 1}
+   Z^T \widehat{W} Z A E_j
+   \right)
+   \\
+   =
+   \tr\left(
+   [ A^{- 1} ( A Z^T \widehat{W} Z A + I ) A \bigr]^{- 1}
+   Z^T \widehat{W} Z A E_j
+   \right)
+   \\
+   =
+   \tr\left(
+   A^{- 1}
+   [ A Z^T \widehat{W} Z A + I \bigr]^{- 1}
+   A
+   Z^T \widehat{W} Z A E_j
+   \right)
+   \\
+   =
+   \tr\left(
+   [ A Z^T \widehat{W} Z A + I \bigr]^{- 1}
+   A
+   Z^T \widehat{W} Z A E_j
+   A^{- 1}
+   \right)
+   \\
+   =
+   \tr\left(
+   [ A Z^T \widehat{W} Z A + I \bigr]^{- 1}
+   A
+   Z^T \widehat{W} Z E_j
+   \right)
+\end{multline*}
+the next-to-last equality being $\tr(A B) = \tr(B A)$ and the
+last equality using the fact that $A$, $E_j$, and $A^{- 1}$ are all
+diagonal so they commute.
+Again we see that we get the same identity of the first and last
+expressions even when $A$ is singular by continuity.
+
+For the trace in the formula \eqref{eq:p-theta}
+for $p_{\nu_k}(\alpha, b, \nu)$
+we have in case $D$ is invertible
+\begin{multline*}
+   \tr \Bigl(
+   \bigl[ Z^T \widehat{W} Z D + I \bigr]^{- 1}
+   Z^T \widehat{W} Z E_k
+   \Bigr)
+   \\
+   =
+   \tr \Bigl(
+   D^{- 1 / 2} \bigl[ D^{1 / 2} Z^T \widehat{W} Z D^{1 / 2} + I \bigr]^{- 1}
+   D^{1 / 2}
+   Z^T \widehat{W} Z E_k
+   \Bigr)
+   \\
+   =
+   \tr \Bigl(
+   \bigl[ D^{1 / 2} Z^T \widehat{W} Z D^{1 / 2} + I \bigr]^{- 1}
+   D^{1 / 2}
+   Z^T \widehat{W} Z
+   D^{- 1 / 2} 
+   E_k
+   \Bigr)
+\end{multline*}
+This, of course, does not work when $D$ is singular.
+We already knew we cannot differentiate $p(\alpha, b, \nu)$ on the
+boundary of the constraint set.
+
+\subsection{Second Derivatives}
+
+For the trace in the formula in Section~\ref{sec:second}
+for $p_{\nu_j \nu_k}(\alpha, b, \nu)$
+we have in case $D$ is invertible
+\begin{multline*}
+   \tr \Bigl(
+   \bigl[ Z^T \widehat{W} Z D + I \bigr]^{- 1}
+   Z^T \widehat{W} Z E_j
+   \bigl[ Z^T \widehat{W} Z D + I \bigr]^{- 1}
+   Z^T \widehat{W} Z E_k
+   \Bigr)
+   \\
+   =
+   \tr \Bigl(
+   D^{- 1 / 2}
+   \bigl[ D^{1 / 2} Z^T \widehat{W} Z D^{1 / 2} + I \bigr]^{- 1}
+   D^{1 / 2}
+   Z^T \widehat{W} Z E_j
+   \\
+   D^{- 1 / 2}
+   \bigl[ D^{1 / 2} Z^T \widehat{W} Z D^{1 / 2} + I \bigr]^{- 1}
+   D^{1 / 2}
+   Z^T \widehat{W} Z E_k
+   \Bigr)
+   \\
+   =
+   \tr \Bigl(
+   \bigl[ D^{1 / 2} Z^T \widehat{W} Z D^{1 / 2} + I \bigr]^{- 1}
+   D^{1 / 2}
+   Z^T \widehat{W} Z E_j
+   D^{- 1 / 2}
+   \\
+   \bigl[ D^{1 / 2} Z^T \widehat{W} Z D^{1 / 2} + I \bigr]^{- 1}
+   D^{1 / 2}
+   Z^T \widehat{W} Z E_k
+   D^{- 1 / 2}
+   \Bigr)
+\end{multline*}
+Again, this does not work when $D$ is singular.
+
+The same trace occurs in the expression for $q_{\nu_j \nu_k}(\alpha, \nu)$
+given in Section~\ref{sec:fisher} and can be calculated the same way.
+
+\begin{thebibliography}{}
+
+\bibitem[Anderson(2003)]{anderson}
+Anderson, T.~W. (2003).
+\newblock \emph{An Introduction to Multivariate Statistical Analysis}, 3rd ed.
+\newblock Hoboken: John Wiley \& Sons.
+
+\bibitem[Barndorff-Nielsen(1978)]{barndorff}
+Barndorff-Nielsen, O. (1978).
+\newblock \emph{Information and Exponential Families}.
+\newblock Chichester: John Wiley \& Sons.
+
+% \bibitem[Bolker et al.(2009)Bolker, B.~M., Brooks, M.~E., Clark, C.~J.,
+%     Geange, S.~W., Poulsen, J.~R., Stevens, M.~H.~H.
+%     and White, J.-S.~S.]{bolker}
+% Bolker, B.~M., Brooks, M.~E., Clark, C.~J., Geange, S.~W., Poulsen, J.~R.,
+%     Stevens, M.~H.~H. and White, J.-S.~S. (2009).
+% \newblock Generalized linear mixed models: a practical guide for ecology and
+%     evolution.
+% \newblock \emph{Trends in Ecology and Evolution},
+%     \textbf{24}, 127--135.
+
+\bibitem[Breslow and Clayton(1993)]{b+c}
+Breslow, N.~E. and Clayton, D.~G. (1993).
+\newblock Approximate inference in generalized linear mixed models.
+\newblock \emph{Journal of the American Statistical Association},
+    \textbf{88}, 9--25.
+
+\bibitem[{Browder(1996)}]{browder}
+Browder, A. (1996).
+\newblock \emph{Mathematical Analysis: An Introduction}.
+\newblock New York: Springer-Verlag.
+
+% \bibitem[Burnham and Anderson(2002)]{b+a}
+% Burnham, K.~P. and Anderson, D.~R. (2002).
+% \newblock \emph{Model Selection and Multimodel Inference: A Practical
+%     Information-Theoretic Approach}, 2nd ed.
+% \newblock New York: Springer-Verlag.
+
+\bibitem[Geyer(1994)]{mcmcml}
+Geyer, C.~J. (1994).
+\newblock On the convergence of Monte Carlo maximum likelihood calculations.
+\newblock \emph{Journal of the Royal Statistical Society, Series B},
+    \textbf{56}, 261--274.
+
+\bibitem[Geyer(2015)]{package-aster}
+Geyer, C.~J. (2015).
+\newblock R package \texttt{aster} (Aster Models), version 0.8-31.
+\newblock \url{http://www.stat.umn.edu/geyer/aster/} and
+    \url{https://cran.r-project.org/package=aster}
+
+\bibitem[Geyer(2013)]{simple}
+Geyer, C.~J. (2013).
+\newblock Asymptotics of maximum likelihood
+    without the LLN or CLT or sample size going to infinity.
+\newblock In \textit{Advances in Modern Statistical Theory and Applications:
+    A Festschrift in honor of Morris L. Eaton}, G.~L. Jones and X. Shen eds.
+\newblock IMS Collections, Vol. 10, pp. 1--24.
+\newblock Institute of Mathematical Statistics: Hayward, CA.
+
+% \bibitem[Geyer and Meeden(2005)]{fuzzy-orange}
+% Geyer, C.~J. and Meeden, G.~D. (2005).
+% \newblock Fuzzy and randomized confidence intervals and P-values
+%     (with discussion).
+% \newblock \emph{Statistical Science}, \textbf{20}, 358--387.
+
+% \bibitem[Geyer and Shaw(2008a)]{evo2008talk}
+% Geyer, C.~J. and Shaw, R.~G. (2008a).
+% \newblock Supporting Data Analysis for a talk to be given at Evolution 2008
+%     University of Minnesota, June 20--24.
+% \newblock University of Minnesota School of Statistics Technical Report
+%     No.~669.
+% \newblock \url{http://www.stat.umn.edu/geyer/aster/}
+
+% \bibitem[Geyer and Shaw(2009)]{tr671r}
+% Geyer, C.~J. and Shaw, R.~G. (2009).
+% \newblock Model Selectionn in Estimation of Fitness Landscales.
+% \newblock Technical Report No. 671 (revised).  School of Statistics,
+%     University of Minnesota.
+% \newblock \url{http://purl.umn.edu/56219}.
+
+\bibitem[Geyer and Thompson(1992)]{g+t}
+Geyer, C.~J. and Thompson, E.~A. (1992).
+\newblock Constrained Monte Carlo maximum likelihood for dependent data,
+    (with discussion).
+\newblock \emph{Journal of the Royal Statistical Society, Series B},
+    \textbf{54}, 657--699.
+
+\bibitem[Geyer et al.(2007)Geyer, Wagenius and Shaw]{gws}
+Geyer, C.~J., Wagenius, S. and Shaw, R.~G. (2007).
+\newblock Aster models for life history analysis.
+\newblock \emph{Biometrika}, \textbf{94}, 415--426.
+
+% \bibitem[Good and Gaskins(1971)]{good-gaskins}
+% Good, I.~J. and Gaskins, R.~A. (1971).
+% \newblock Nonparametric roughness penalties for probability densities.
+% \newblock \emph{Biometrika}, \textbf{58}, 255--277.
+
+% \bibitem[Green(1987)]{green}
+% Green, P.~J. (1987).
+% \newblock Penalized likelihood for general semi-parametric regression models.
+% \newblock \emph{International Statistical Review}, \textbf{55}, 245--259.
+
+\bibitem[Harville(1997)]{harville}
+Harville, D.~A. (1997).
+\newblock{Matrix Algebra From a Statistician's Perspective}.
+\newblock New York: Springer.
+
+% \bibitem[Hastie et al.(2009)Hastie, Tibshirani and Friedman]{hastie-et-al}
+% Hastie, T., Tibshirani, R. and Friedman J. (2009).
+% \newblock \emph{Elements of Statistical Learning: Data Mining,
+%     Inference and Prediction}, 2nd ed.
+% \newblock New York: Springer.
+
+% \bibitem[Hoerl and Kennard(1970)]{hoerl-kennard}
+% Hoerl, A.~E. and Kennard, R.~W. (1970).
+% \newblock Ridge regression: applications to nonorthogonal problems.
+% \newblock \emph{Technometrics}, \textbf{12}, 69--82.
+
+% \bibitem[Latta(2009)]{latta}
+% Latta, R.~G. (2009).
+% \newblock Testing for local adaptation in \emph{Avena barbata},
+%     a classic example of ecotypic divergence.
+% \newblock \emph{Molecular Ecology}, \textbf{18}, 3781--3791.
+
+% \bibitem[Le~Cam and Yang(2000)]{lecam-yang}
+% Le~Cam, L. and Yang, G.~L. (2000).
+% \newblock \emph{Asymptotics in Statistics: Some Basic Concepts}, 2nd ed.
+% \newblock New York: Springer.
+
+% \bibitem[Lee and Nelder(1996)]{l+n}
+% Lee, Y. and Nelder, J.~A. (1996).
+% \newblock Hierarchical generalized linear models (with discussion).
+% \newblock \emph{Journal of the Royal Statistical Society, Series B},
+%     \textbf{58}, 619--678.
+
+% \bibitem[Lee et al.(2006)Lee, Nelder and Pawitan]{l+n+p}
+% Lee, Y., Nelder, J.~A. and Pawitan, Y. (2006).
+% \newblock \emph{Generalized Linear Models with Random Effects}.
+% \newblock London: Chapman and Hall.
+
+% \bibitem[McCullagh(2008)]{mccullagh}
+% McCullagh, P. (2008).
+% \newblock Sampling bias and logistic models.
+% \newblock \emph{Journal of the Royal Statistical Society, Series B},
+%     \textbf{70}, 643--677.
+
+% \bibitem[Oehlert(2000)]{oehlert}
+% Oehlert, G.~W. (2000).
+% \newblock \emph{A First Course in Design and Analysis of Experiments}.
+% \newblock New York: W.~H. Freeman.
+
+% \bibitem[R Development Core Team(2010)]{rcore}
+% R Development Core Team (2010).
+% \newblock R: A language and environment for statistical computing.
+% \newblock R Foundation for Statistical Computing, Vienna, Austria.
+% \newblock \url{http://www.R-project.org}.
+
+% \bibitem[Ridley and Ellstrand(2010)]{ridley}
+% Ridley, C.~E. and Ellstrand, N.~C. (2010).
+% \newblock Rapid evolution of morphology and adaptive life history in
+%     the invasive California wild radish (\emph{Raphanus sativus}) and
+%     the implications for management.
+% \newblock \emph{Evolutionary Applications}, \textbf{3}, 64--76.
+
+\bibitem[Rockafellar and Wets(2004)]{raw}
+Rockafellar, R.~T. and Wets, R. J.-B. (2004).
+\newblock \emph{Variational Analysis}, corr.\ 2nd printing.
+\newblock Berlin: Springer-Verlag.
+
+\bibitem[Searle et al.(1992)Searle, Casella and McCulloch]{searle}
+Searle, S.~R., Casella, G. and McCulloch, C.~E. (1992).
+\newblock \emph{Variance Components}.
+\newblock New York: John Wiley.
+
+\bibitem[Shaw et al.(1999)Shaw, Promislow, Tatar, Hughes, and Geyer]{promislow}
+Shaw, F.~H., Promislow, D.~E.~L., Tatar, M., Hughes, K.~A.
+    and Geyer, C.~J. (1999).
+\newblock Towards reconciling inferences concerning genetic variation
+    in senescence.
+\newblock \emph{Genetics}, \textbf{152}, 553--566.
+
+\bibitem[Shaw, et~al.(2002)Shaw, Geyer and Shaw]{shaw-geyer-shaw}
+Shaw, F.~H., Geyer, C.~J. and Shaw, R.~G. (2002).
+\newblock A Comprehensive Model of Mutations Affecting Fitness
+    and Inferences for \emph{Arabidopsis thaliana}
+\newblock \emph{Evolution}, \textbf{56}, 453--463.
+
+% \bibitem[Shaw et al.(2007)Shaw, Geyer, Wagenius, Hangelbroek, and
+%     Etterson]{aster2tr}
+% Shaw, R.~G., Geyer, C.~J., Wagenius, S., Hangelbroek, H.~H., and
+%     Etterson, J.~R. (2007).
+% \newblock Supporting data analysis for ``Unifying life history analysis
+%     for inference of fitness and population growth''.
+% \newblock University of Minnesota School of Statistics Technical Report
+%     No.~658
+% \newblock \url{http://www.stat.umn.edu/geyer/aster/}
+
+\bibitem[Shaw et al.(2008)Shaw, Geyer, Wagenius, Hangelbroek, and
+    Etterson]{aster2}
+Shaw, R.~G., Geyer, C.~J., Wagenius, S., Hangelbroek, H.~H., and
+    Etterson, J.~R. (2008).
+\newblock Unifying life history analysis for inference of fitness
+    and population growth.
+\newblock \emph{American Naturalist} \textbf{172}, E35--E47.
+
+\bibitem[Sung and Geyer(2007)]{sung}
+Sung, Y.~J. and Geyer, C.~J. (2007).
+\newblock Monte Carlo likelihood inference for missing data models.
+\newblock \emph{Annals of Statistics}, \textbf{35}, 990--1011.
+
+% \bibitem[Thompson and Geyer(2007)]{fuzzy-genetics}
+% Thompson, E.~A. and Geyer, C.~J. (2007).
+% \newblock Fuzzy P-values in latent variable problems.
+% \newblock \emph{Biometrika}, \textbf{94}, 49--60.
+
+\bibitem[Thompson and Guo(1991)]{thompson}
+Thompson, E. A. and Guo, S. W. (1991).
+\newblock Evaluation of likelihood ratios for complex genetic models.
+\newblock \emph{IMA J. Math. Appl. Med. Biol.}, \textbf{8}, 149--169.
+
+\end{thebibliography}
+
+\end{document}
+

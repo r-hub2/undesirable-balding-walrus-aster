@@ -1,0 +1,50 @@
+
+R version 3.5.1 (2018-07-02) -- "Feather Spray"
+Copyright (C) 2018 The R Foundation for Statistical Computing
+Platform: x86_64-pc-linux-gnu (64-bit)
+
+R is free software and comes with ABSOLUTELY NO WARRANTY.
+You are welcome to redistribute it under certain conditions.
+Type 'license()' or 'licence()' for distribution details.
+
+R is a collaborative project with many contributors.
+Type 'contributors()' for more information and
+'citation()' on how to cite R or R packages in publications.
+
+Type 'demo()' for some demos, 'help()' for on-line help, or
+'help.start()' for an HTML browser interface to help.
+Type 'q()' to quit R.
+
+> 
+>  library(aster)
+Loading required package: trust
+> 
+>  ifam <- fam.truncated.poisson(truncation = 0)
+> 
+>  # change to include all cases in case splitting
+>  # see ../src/astfam.c lines 338 to 373
+>  theta <- seq(-6, 6, 0.5)
+>  mu <- exp(theta)
+> 
+>  zeroth <- double(length(theta))
+>  first <- double(length(theta))
+>  second <- double(length(theta))
+> 
+>  for (i in seq(along = theta)) {
++     zeroth[i] <- famfun(ifam, 0, theta[i])
++     first[i] <- famfun(ifam, 1, theta[i])
++     second[i] <- famfun(ifam, 2, theta[i])
++  }
+> 
+>  all.equal(zeroth, log(exp(mu) - 1))
+[1] TRUE
+>  tau <- mu / (1 - exp(- mu))
+>  all.equal(first, tau)
+[1] TRUE
+>  all.equal(second, tau * (1 - tau * exp(- mu)))
+[1] TRUE
+> 
+> 
+> proc.time()
+   user  system elapsed 
+  0.248   0.012   0.250 

@@ -1,0 +1,976 @@
+
+\documentclass[11pt]{article}
+
+\usepackage{amsmath}
+\usepackage{amsfonts}
+\usepackage{indentfirst}
+\usepackage{natbib}
+\usepackage{url}
+
+\newcommand{\real}{\mathbb{R}}
+\newcommand{\set}[1]{\{\, #1 \,\}}
+\newcommand{\inner}[1]{\langle #1 \rangle}
+
+\newcommand{\boldbeta}{\boldsymbol{\beta}}
+\newcommand{\boldeta}{\boldsymbol{\eta}}
+\newcommand{\boldtheta}{\boldsymbol{\theta}}
+\newcommand{\boldvarphi}{\boldsymbol{\varphi}}
+\newcommand{\bolda}{\mathbf{a}}
+\newcommand{\boldI}{\mathbf{I}}
+\newcommand{\boldM}{\mathbf{M}}
+\newcommand{\boldX}{\mathbf{X}}
+\newcommand{\boldu}{\mathbf{u}}
+\newcommand{\boldv}{\mathbf{v}}
+\newcommand{\boldw}{\mathbf{w}}
+\newcommand{\boldx}{\mathbf{x}}
+\newcommand{\boldzero}{\boldsymbol{0}}
+
+\begin{document}
+
+\title{Design Document for the Aster Package}
+
+\author{Charles J. Geyer}
+
+\maketitle
+
+\section{Current Status}
+
+Versions of the aster package up through version 0-4.1,
+which at the time this document was begun was version on CRAN,
+were written without a design document, and it
+shows, the package having a number of limitations and other problems.
+At that time, the development version of the
+aster package differed from the CRAN version only by the addition
+of another family \verb@two.truncated.poisson@.
+None of the design issues had been addressed.
+
+Known design issues (bugs, misfeatures, whatever) are as follows.
+\begin{enumerate}
+\item Representation of families. \label{it:family}
+\item Representation of graphical model. \label{it:graph}
+\item Data and parameter validity checks. \label{it:valid}
+\item Distinguished point in parameter space. \label{it:point}
+\item Chain components (multivariate families). \label{it:chain}
+\item Elimination of ``individuals''. \label{it:ind}
+\item Starting point for optimization. \label{it:start}
+\item Constrained parameter spaces. \label{it:constrain}
+\item Mixed parameterization. \label{it:mix}
+\item User-specified families. \label{it:user}
+\item Identifiability. \label{it:identify}
+\item Maximization with respect to non-exponential family parameters.
+    \label{it:non-expo}
+\end{enumerate}
+We take these out of order.
+
+\section{Elimination of Individuals}
+
+This is item~\ref{it:ind} on our list.  Theoretically, it is trivial.
+The first submission of \citet{gws} had a notion of ``individuals.''
+Data were indexed $X_{i j}$ where $i$ ran over individuals and $j$ ran
+over nodes of the graph.  In the second submission it was realized that
+individuals were superfluous, the index $i$ could be removed from the notation,
+and data indexed $X_j$.  The graph indicates the dependence structure,
+including the independence of ``individuals.''  So individuals were a mere
+convenience.  Moreover, that convenience made the notation (and the computer
+code) messier and confused the referee.  Models with
+individuals appeared less general, although they were actually not:
+the case of an old-style model with precisely one individual is the same
+as a new-style model, which has no notion of individual.
+
+Hence we could make no code changes at all.  Individuals are sometimes
+a convenience and do no harm, because they can be avoided.  But eventually
+the code should be changed to match the final version of the paper (whatever
+that may look like).
+
+In particular, we should simply eliminate all references to individuals
+at all user-visible levels.  In the R functions, in their documentation,
+in the package vignette.  In any new vignettes we write.  That is a lot
+of work.
+
+We could also eliminate all reference to individuals in the C code,
+but that is perhaps not worth the trouble.  A bunch of
+\begin{verbatim}
+for (i = 0; i < nind; ++i)
+\end{verbatim}
+loops that always execute exactly once because we always have \verb@nind@
+equal to one, don't slow anything down.  They are just annoying to read.
+Since few people will read the C code, it doesn't really matter.
+
+Eventually, the C code will also have to be rewritten to account for
+chain components (Section~\ref{sec:chain} below).  There is no point in
+two rewrites (one to eliminate individuals, one to introduce chain components).
+We should do both at once.
+
+\section{Affine Models} \label{sec:affine}
+
+This is item~\ref{it:point} on our list, but it also relates
+to items~\ref{it:start} and \ref{it:constrain}.
+The conditional canonical parameter space $\Theta$
+or the unconditional canonical parameter space $\Phi$ are convex sets in
+$\real^d$ (Appendix~E of Technical Report~644).  All versions of the package
+to date have assumed $\Theta = \Phi = \real^d$, since that was the case
+for the families implemented to date (Bernoulli, Poisson, $k$-truncated
+Poisson).  Now we want to add negative binomial and $k$-truncated negative
+binomial, for which the (one-dimensional) parameter space
+is $\set{ \theta : \theta < 0 }$.  Hence we run up against constraints,
+item~\ref{it:constrain} on our list, and the parameter space not containing
+zero, which is item~\ref{it:start} on our list, because the current versions
+have the zero vector as the default starting point for optimization (the user
+can specify another point, but the default should work).  We need to fix those.
+For more constrained models, see Section~\ref{sec:constrain} below.
+
+More theoretical and ultimately more important is the notion of
+\emph{canonical linear models}, which are described in Section~1.4 of the
+revised version of \citet{gws}, are reparameterizations
+of the form
+\begin{equation} \label{eq:clam}
+   \boldeta = \boldM \boldbeta
+\end{equation}
+where the ``linear predictor'' $\boldeta$ is either the conditional
+canonical parameter vector $\boldtheta$ or the unconditional canonical
+parameter vector $\boldvarphi$ depending on which kind of model is being
+used, where $\boldM$ is a known matrix called the \emph{model matrix},
+and $\boldbeta$ is the new parameter vector.
+This is like conventional linear and generalized linear model theory, but we
+now see that it is completely bogus (and always was).  The idea that
+if you want an ``intercept'' term you add a column of ones to $\boldM$
+and thereby add another parameter (increase the dimension of $\boldbeta$)
+and that is the \emph{only} way to get an ``intercept'' in the model is
+wrong-headed.  For one thing, it assumes that the zero vector is always
+a valid parameter value.  Now we see it isn't.
+
+What we need instead is the notion of \emph{canonical affine models},
+which replace \eqref{eq:clam} by
+\begin{equation} \label{eq:affm}
+   \boldeta = \bolda + \boldM \boldbeta
+\end{equation}
+where $\bolda$ is a known vector, which we will call
+the \emph{distinguished point} of the parameter space.
+Note that if $\bolda$ is in the column space of $\boldM$, that is,
+$\bolda = \boldM \boldbeta$ for some $\boldbeta$, then \eqref{eq:clam}
+and \eqref{eq:affm} specify the
+same family of models, and the extra generality of \eqref{eq:affm} does
+nothing.  This is the usual case, and that explains
+the popularity of linear models.
+
+Sometimes, however, we do not want our distinguished point $\bolda$ to
+be the zero vector.  We will impose the condition that $\bolda$ is in
+the parameter space of the linear predictor, either $\Theta$ or $\Phi$
+as the case may be.  Then $\boldbeta = \boldzero$ maps to $\boldeta = \bolda$,
+and hence $\boldbeta = \boldzero$ is again a valid starting point, which solves
+in generality item~\ref{it:start} on our list.
+
+We need to see what replacing \eqref{eq:clam} by \eqref{eq:affm} does to
+the rest of aster model theory.  Writing
+$$
+   \tilde{l}(\boldbeta) = l(\boldeta) = l(\bolda + \boldM \boldbeta)
+$$
+we get
+\begin{align*}
+   \nabla \tilde{l}(\boldbeta) & = \nabla l(\boldeta) \boldM
+   \\
+   \nabla^2 \tilde{l}(\boldbeta) & = \boldM^T \nabla^2 l(\boldeta) \boldM
+\end{align*}
+which are the same formulas as when we define the linear predictor
+by \eqref{eq:clam} except for $\boldeta$ being defined differently.
+
+Thus it seems the only changes we need to make to add canonical affine models
+are adding a ``distinguished point'' $\bolda$ argument to the \verb@aster@
+function and changing the evaluation of the linear predictor $\boldeta$.
+
+It is an interesting historical note that my thesis makes a great deal of
+fuss about affine versus linear.  I guess I forgot.  That stuff wasn't
+published.  It was too trivial.  And it is trivial, but a triviality that
+conventional statistics botches.  We can't afford the luxury if we are
+going to have general exponential families (not just ones whose canonical
+parameter space is the whole real line).  I just checked the help for
+the R \verb@family@ function and note that \verb@glm@ doesn't handle negative
+binomial, hence avoids dealing with this issue.
+
+The alternative of redefining the model (negative binomial, for example)
+so its canonical parameter space contains zero is unappealing.  For one
+thing, the unconventional parameterization may confuse users.  For another,
+although we can assure the conditional canonical parameter space $\Theta$
+contains the zero vector, we cannot assure the unconditional canonical
+parameter space $\Phi$ contains the zero vector, because the mapping from
+$\Theta$ to $\Phi$ is very complicated.
+
+When the user does not specify a distinguished point, there should be one
+provided by the software.  This means adding a new function to family
+implementations, or perhaps just a new column in the family branch table,
+that provides a usable default, e.~g., zero for the families for which that
+works, but perhaps $- 1$ for the negative binomial.  Collecting all such
+defaults into a vector gives a valid conditional canonical parameter value
+distinguished point $\boldtheta$.  Mapping that to the corresponding
+unconditional canonical parameter value $\boldvarphi$ gives a valid
+distinguished point for unconditional models.
+
+Note that this will change the behavior of unconditional aster models.
+It will change the analysis for the example in \citet{gws}, which
+was not changed in the revision!  What do we think about that?
+Of course, we can always set the distinguished point so that the analysis
+does not change, that is, use $\bolda = \boldzero$ rather than the image
+of $\boldzero$ under the mapping $\boldtheta \mapsto \boldvarphi$.
+
+What do we think about that?  It does not seem to be a serious problem.
+If \verb@varbl@ was in the model, then we are in the case discussed above
+where $\bolda$ is in the column space of $\boldM$ and \eqref{eq:clam} and
+\eqref{eq:affm} parameterize the same families of distributions (though
+not with the same $\boldbeta$ in each).
+Although the ``\verb@varb@'' regression coefficients change,
+the MLE \emph{probability distribution} does not.  So we are o.~k.
+Nothing besides those few regression coefficients would change.
+The confidence intervals shown in Figure~2 would not change.
+The $P$-values for the tests shown in Table~1 would not change.
+
+\label{pg:regular}
+One last point about item~\ref{it:constrain} on our list.
+If we limit aster to full, regular exponential families,
+then if we start at a feasible point (which we will by default)
+and if the \verb@mlogl@ function returns
+\verb@list(value = Inf)@ when called with a parameter value not in
+the canonical parameter space (conditional or unconditional as the case
+may be), then the default optimizer (my new \verb@trust@ package) can
+handle this.
+
+This only works for \emph{regular} exponential families, whose full
+canonical parameter space is an open set, in which case minus the log
+likelihood converges to $\infty$ as the parameter goes to the boundary
+(a property of exponential families, the log likelihood is upper
+semicontinuous, so its minus, what \verb@mlogl@ computes, must either
+go to infinity or be finite on the boundary, by lower semicontinuity,
+and the latter is ruled out by the definition of regularity).
+So the solution is never on the boundary, and a trust region algorithm
+can deal with the boundary (by always decreasing the trust region whenever
+the value \verb@Inf@ is returned by \verb@mlogl@).
+
+Since \verb@nlm@ and \verb@optim@ cannot handle boundaries well (even
+this very well behaved kind).  We might as well take them out and make
+\verb@trust@ the only allowed optimizer.
+
+Fortunately, brand name exponential families are all regular.
+We need not worry about non-regular exponential families.
+
+\section{Representation of Families} \label{sec:fam-one}
+
+This is items~\ref{it:family} and \ref{it:user} on our list.
+It involves a very BAD
+(broken as designed, a hackerism) decision.  In versions to date,
+a family is coded by an integer, which serves simultaneously as an
+index for the vector of names returned by \verb@families()@, which
+is
+\begin{verbatim}
+[1] "bernoulli"         "poisson"           "non.zero.poisson" 
+[4] "two.trunc.poisson"
+\end{verbatim}
+in the development version (and the first three in earlier versions)
+and also as an index into a branch
+table \verb@myfuntab@ found in \verb@astfam.c@, which is a static array
+of \verb@struct funtab@ allocated at compile time.
+
+This is very inflexible.  We can see it already in not being able to
+specify $k$-truncated Poisson for arbitrary $k$.
+(Why just zero and two?  The code is written for general $k$, but there is
+no way to specify a family with an extra parameter $k$).
+
+Now we want more families with extra non-exponential-family parameters.
+We will refer to them here as ``hyperparameters'' although our meaning
+(non-exponential-family) has nothing to do with the conventional Bayesian
+usage.  Let us list some.
+\begin{enumerate}
+\item[(a)] $k$-truncated Poisson with $k$ a nonnegative integer hyperparameter.
+\item[(b)] negative binomial with size parameter $\alpha$ a positive real
+    hyperparameter.
+    If $\psi$ is the cumulant function of the geometric family, then we
+    mean the family with cumulant function $\alpha \psi$.
+\item[(c)] $k$-truncated negative binomial with $k$ a nonnegative integer
+    hyperparameter and size $\alpha$ a positive real hyperparameter
+    (the previous item truncated).
+\item[(d)] untruncated Poisson with size parameter $r$ a positive real
+    hyperparameter.
+    If $\psi$ is the cumulant function of the usual Poisson, then we mean
+    the family with cumulant function $r \psi$.  This is equivalent to
+    adding the constant $\log r$ to the conditional canonical parameter,
+    what the \verb@glm@ function deals with by way of its
+    \verb@offset@ argument.
+\item[(e)] $k$-truncated Poisson with $k$ a nonnegative integer hyperparameter
+    and size $r$ a positive real parameter (the previous item truncated).
+\item[(f)] binomial with sample size $n$ as a positive integer hyperparameter.
+    If $\psi$ is the cumulant function of the Bernoulli family, then we
+    mean the family with cumulant function $n \psi$.
+\item[(g)] normal location family with scale parameter $\sigma$ a positive
+    real hyperparameter.
+\item[(h)] gamma scale family with shape parameter $\alpha$ a positive
+    real hyperparameter.
+    If $\psi$ is the cumulant function of the exponential distribution, then we
+    mean the family with cumulant function $\alpha \psi$.
+\end{enumerate}
+This does not even get into multivariate (chain group) families, which
+are the subject of Section~\ref{sec:chain} below.
+
+\label{pg:super}
+In this document we will call any of the above a \emph{superfamily}.
+It becomes a \emph{family} when all hyperparameters are specified.
+Negative binomial is a superfamily; negative binomial with size = 2.22
+(and no truncation) is a family.  We can consider Bernoulli both a family
+and a superfamily: since it has no hyperparameters, there is no difference.
+
+One further issue, which is item~\ref{it:user}.  We should allow
+a new superfamily to be specified without recompilation.  The user should
+be allowed to code the cumulant function and its first two derivatives
+in R as well as a random variate simulation function, and it should work
+(assuming the R code is o.~k.)  This is not a high priority, but we should
+allow for the possibility in our redesign.
+More on this in Section~\ref{sec:user} below.
+
+For our first redesign decision, do we keep integer codes for families
+or drop them entirely?  Since in any particular analysis, we do not
+expect to use many different families, we can keep integer codes if we
+allow them to be associated with general family specifications, (like
+negative binomial with size = 2.22).
+But this means if we continue to use these
+integer codes as indices into a branch table, the branch table (1) cannot
+be statically allocated and (2) must have room for hyperparameter values,
+so (3) different rows of the table can correspond to families belonging to
+the same superfamily.
+
+Actually (1) is overkill.  It could be statically allocated with room
+for, say, 100 families, but no arbitrary limits is preferable.
+Or it could be dynamically allocated and never freed, although perhaps
+reallocated if more room is needed.  Actually we should stop this blather
+and explain the issue we are struggling with here.   There is no problem
+when the user calls \verb@aster@ to fit a model.  Memory for the branch
+table could be allocated at the beginning and released at the end.
+The problem arises that the \verb@mlogl@ function need not be called from
+inside aster, and has some usefulness called from outside.  (I have used
+it in the Lande-Arnold analysis to calculate Pearson residuals.)
+Actually it is not clear this is a problem.
+
+As a user interface issue, we should make the \verb@fam@ argument to
+\verb@aster@ and \verb@mlogl@ the same.  It is the R way, that these be
+informative, not integers.  So they can just be passed to \verb@mlogl@,
+which can allocate its own branch table.  Arrrghhh!!!!
+
+That was way too bogged down in implementation details.  There is no
+problem in separating \verb@mlogl@ into two functions, one called from
+inside \verb@aster@ and one called from the user level.  The user level
+\verb@mlogl@ should do its own branch table allocation and deallocation.
+The non-user level \verb@mloglhelper@, which is not exported by the aster
+package and which is only called from inside the \verb@objfun@ defined
+inside \verb@aster.default@, need not allocate-deallocate, since
+\verb@aster.default@ can handle that.
+
+Anyway, allocation-deallocation versus static is not a priority.
+Go with static and error message for more than 100 families for now.
+
+Similarly, we can go with a fixed upper bound on the number of hyperparameters
+for now.  Looks like two would handle all we have in mind.  Could allow more.
+
+So this brings us to the important decision about how the user specifies
+families.  For reasons of backward compatibility, we would like to allow
+the use of numbers with the default coding for numbers 1 to 4 being what
+we have now (in the development version, shown above).
+We should also allow family specifications something like
+\begin{verbatim}
+list(name = "negative.binomial", shape = 2.22, truncation = 2)
+\end{verbatim}
+It is a user interface issue that if the \verb@truncation@ argument
+is missing, then this means the ordinary untruncated negative binomial.
+Similarly, we allow
+\begin{verbatim}
+list(name = "poisson")
+list(name = "poisson", truncation = 0)
+list(name = "poisson", shape = 2.22)
+list(name = "poisson", shape = 2.22, truncation = 0)
+\end{verbatim}
+By analogy, we could allow
+\begin{verbatim}
+list(name = "negative.binomial")
+\end{verbatim}
+as an untruncated geometric (negative binomial with shape = 1)
+but perhaps we should also allow
+\begin{verbatim}
+list(name = "geometric")
+list(name = "geometric", truncation = 2)
+\end{verbatim}
+
+Probably we should provide constructor functions for these guys.
+We must choose names that do not conflict with the constructor
+functions for use with \verb@glm@ documented on the help for
+the \verb@family@ function.
+\begin{verbatim}
+fam.poisson(size = 1, truncation) {
+    stopifnot(is.numeric(size))
+    stopifnot(length(size) == 1)
+    stopifnot(size > 0)
+    if (missing(truncation)) {
+        result <- list(name = "poisson", size = size)
+    } else {
+        stopifnot(is.numeric(truncation))
+        stopifnot(length(truncation) == 1)
+        stopifnot(truncation == round(truncation))
+        stopifnot(truncation >= 0)
+        result <- list(name = "poisson", size = size,
+            truncation = truncation)
+    }
+    class(result) <- "astfam"
+    return(result)
+}
+\end{verbatim}
+Providing constructor functions
+allows for defaults and arg matching
+so \verb@fam.poisson(tr = 2)@ works, as does \verb@fam.poisson()@.
+It also allows for error checking, so the call
+\verb@fam.poisson(size = - 6)@ does
+not work.
+It also tags the result with class \verb@"astfam"@ so checks on that
+are possible further down the road.
+Of course users can fake all of this stuff, but if they do that,
+then \emph{ipso facto} they are experts and deserve whatever happens
+to them.
+
+At the top of \verb@glm@ we see
+\begin{verbatim}
+if (is.character(family))
+    family <- get(family, mode = "function",
+        envir = parent.frame())
+if (is.function(family))
+    family <- family()
+if (is.null(family$family)) {
+    print(family)
+    stop("'family' not recognized")
+}
+\end{verbatim}
+Users can certainly store functions in a list, since they are objects
+like any other.  We can certainly do the
+\begin{verbatim}
+if (is.function(family))
+    family <- family()
+\end{verbatim}
+trick.  Presumably we replace the last bit with
+\begin{verbatim}
+if (class(family) != "astfam") {
+    print(family)
+    stop("'family' not recognized")
+}
+\end{verbatim}
+We can also do the trick with character strings.
+Of course those strings are not very natural,
+\verb@fam.poisson@ and the like.
+We could make \verb@fam@ bogo-generic and do something like
+\begin{verbatim}
+fam <- function(string) {
+    stopifnot(is.character(string))
+    famfunnam <- paste("fam", "string", sep = ".")
+    famfun <- get(famfunnam, mode = "function")
+    if (is.function(famfun)) {
+        result <- try(famfun())
+        if (class(result) == "astfam")
+            return(result)
+    }
+    famfun <- get(string, mode = "function")
+    if (is.function(famfun)) {
+        result <- try(famfun())
+        if (class(result) == "astfam")
+            return(result)
+    }
+    print(string)
+    stop("'family' not recognized")
+}
+\end{verbatim}
+Now both \verb@fam("fam.poisson")@ and \verb@fam("poisson")@ work.
+Note that it is important that we try with
+the \verb@famfunnam@ first, so we do not call the \verb@poisson@
+function that goes with \verb@glm@.  If the argument string is
+\verb@"poisson"@, then we succeed in looking up the function
+\verb@"fam.poisson"@ and return the result of that.
+In any event, since \verb@poisson()@ does not return an object
+of class \verb@"astfam"@, we won't go completely wrong
+even if we reversed the order, so long as we check for the
+result being class \verb@"astfam"@.
+
+Now we can have at the top of \verb@aster@ or whatever needs it
+\begin{verbatim}
+if (is.character(family))
+    family <- fam(family)
+if (is.function(family))
+    family <- try(family())
+if (class(family) != "astfam") {
+    print(family)
+    stop("'family' not recognized")
+}
+\end{verbatim}
+
+We haven't resolved all issues about family representation,
+but to do that we need to also look at multivariate families.
+See Section~\ref{sec:multi-fam} below.
+
+\section{Multivariate Families} \label{sec:chain}
+
+This is item~\ref{it:chain} on our list.
+Item~\ref{it:graph} is also involved.
+There are two quite unrelated issues here, which we deal
+with in two subsections.
+
+\subsection{Representation of Graphs}
+
+To specify an aster-type chain graph model we need to have an
+index set $J$ running over non-root nodes of the graph, which
+we may take to be \verb@seq(1:nrow(data))@, where \verb@data@
+is the data frame.  Then we need a partition $\mathcal{G}$ of $J$,
+which we may represent as a list of lists, call it \verb@G@ in R.
+Then we must have
+\begin{verbatim}
+identical(sort(unlist(G)), seq(1, nrow(data)))
+\end{verbatim}
+in order for \verb@G@ to represent a partition.
+Finally we need the parent map
+$$
+   p : \mathcal{G} \to J \cup F
+$$
+where $F$ is the set of root nodes.
+Let us keep the idea that index zero codes for root,
+as in current and earlier versions.  Then we
+can represent $p$ as an integer vector \verb@pred@ of length \verb@length(G)@ 
+taking values in \verb@seq(0, nrow(data))@.
+This says the parent of
+chain component \verb@G[[i]]@ is either node \verb@pred[i]@
+or is a root node if \verb@pred[i] == 0@, in which case we have to look
+up the data as \verb@root[i]@.  Note that this means the lengths of
+\verb@pred@ and \verb@root@ change from \verb@nrow(data)@ (which is what
+they are in all versions to date) to \verb@length(G)@,
+that is, from the cardinality of $J$ (the number of non-root nodes)
+to the cardinality of $\mathcal{G}$ (the number of chain components).
+
+In versions up to the current version, when $p$ was a map $J \to J \cup F$
+so that every chain component (in the new terminology) was a singleton,
+we required
+\begin{verbatim}
+all(pred < seq(along = pred))
+\end{verbatim}
+to ensure the graph was acyclic.  This required the user to assure
+that parents came before (lower index) than children in the data.
+Now the situation is much more complicated.  The analogous check for
+the new setup would be
+\begin{verbatim}
+foo <- TRUE
+for (i in seq(along = G))
+    foo <- foo && all(pred[i] < G[[i]])
+\end{verbatim}
+After the loop \verb@foo@ should still be true (is there a way to do this
+more simply?)  Of course, this is tricker to explain to users and even
+trickier for users to comprehend.  Perhaps it is time to bite the bullet
+and implement a topological sort for R.
+A simple algorithm that tests a directed graph for acyclicity is given
+by Aho, Hopcroft and Ullman (1983, p.~221).
+The Unix function \verb@tsort@ tests a directed graph for acyclicity
+and produces the total ordering consistent with the partial ordering
+if the graph is acyclic.  Curiously, although Unix has always had
+this main program \verb@tsort@, neither Unix nor R has a library
+function to do this so-called ``topological sort'' algorithm.
+A search of \url{https://r-project.org} shows that the contributed package
+\verb@ggm@ has a topological sort function \verb@topSort@ but it only
+works on directed graphs represented as adjacency matrices (which we don't
+want to deal with).  Topological sort is trivial.  Just re-implement it.
+Eventually.  It is not a high priority.  We can go with the order restriction
+above at the beginning.
+
+\subsection{Representation of Families} \label{sec:multi-fam}
+
+There is one family for each $G \in \mathcal{G}$, hence the list of families
+is a (list of lists) of length \verb@length(G)@, that is, the cardinality
+of $\mathcal{G}$.  The $i$-th family is a model for the variables at nodes
+in \verb@G[[i]]@ given the variable at node \verb@pred[i]@ or given
+\verb@root[i]@ if \verb@pred[i] == 0@.
+
+\begin{enumerate}
+\item[(i)] normal location-scale family with canonical statistics that
+    are $X$ and $X^2$, where $X$ is the variable usually called normal,
+    so the canonical parameters are $\theta_1 = \mu / \sigma^2$ and
+    $\theta_2 = - 1 / 2 \sigma^2$ in terms of the usual parameters.
+\item[(j)] gamma shape-scale family with canonical statistics that
+    are $X$ and $\log X$, where $X$ is the variable usually called gamma,
+    so the canonical parameters are $\theta_1 = \lambda$
+    and $\theta_2 = \alpha$ in terms of the usual parameters.
+\item[(k)] multivariate Bernoulli with canonical statistics $X_1$, $\ldots$,
+    $X_k$ and parameter vector $\boldtheta_G = (\theta_1, \ldots, \theta_k)$
+    in terms of which the success probabilities (conditional mean value
+    parameters are given by
+$$
+   \xi_j = \frac{e^{\theta_j}}{\sum_{i = 1}^k e^{\theta_i}}
+$$
+\item[(l)] multinomial with sample size $n$ as a positive integer
+    hyperparameter.
+    If $\psi_G$ is the cumulant function of the multivariate Bernoulli family,
+    then we mean the family with cumulant function $n \psi_G$.
+\end{enumerate}
+
+Constraints on parameter spaces for these families are discussed
+in Section~\ref{sec:constrain} below.
+
+Of the families discussed, all are identifiable except the multinomial
+families, (k) and (l), which are the subject of the following section.
+
+For the multinomial families we do not need to specify
+the number of categories, the $k$ in the descriptions in items (k) and (l)
+above, because it is the cardinality of the chain component $G \in \mathcal{G}$
+with which the family is associated.  This means that different chain
+components of different cardinality can have the same family specification
+\verb@list(name = "multinomial")@ and actually be families with different
+$k$ because the cardinalities of the corresponding $G$ are different.
+It is clear that the cardinality of $G$ must be at least two for $G$
+to be associated with a multinomial model.
+
+When the cardinality of $G$ is two, and the parent variable $X_{p(G)}$ is
+also Bernoulli, we have the peculiar situation that the elements of the
+chain component are each Bernoulli and they satisfy $X_1 = X_{p(G)} - X_2$
+(more on this issue in the following section), but this case
+cannot be replaced by the Bernoulli family, because it is a distribution
+for two nodes in the graph rather than one.  Such a family serves as a
+``switch'' activating either the descendants of $X_1$ or the descendants
+of $X_2$ but not both when $X_{p(G)} = 1$.
+
+It is clear that the cardinality of $G$ must be exactly two for $G$
+to be associated with a two-parameter normal or gamma model, items
+(i) and (j) in our model lists.
+
+\subsection{Dropping of Parameters for Multinomial}
+
+This is item~\ref{it:identify} on our list.
+A multinomial conditional family for chain group $G$ satisfies the data
+constraint
+\begin{equation} \label{eq:constraint}
+   \sum_{j \in G} X_j = X_{p(G)}.
+\end{equation}
+It follows that if we are fitting a conditional model that
+the vector $\boldu_G$ having components $u_{G, j}$ defined by
+$$
+   u_{G, j} = \begin{cases} 1, & j \in G \\ 0, & j \notin G \end{cases}
+$$
+is a direction of constancy of the log likelihood, because
+$$
+   \inner{ \boldX, \boldtheta + s \boldu_G }
+   =
+   \inner{ \boldX, \boldtheta } + s X_{p(G)}
+$$
+for any scalar $s$ and we may drop the term $s X_{p(G)}$ from the
+log likelihood for this model, because $X_{p(G)}$ is not considered
+data for this model because it is conditional.
+
+It follows that if we are fitting an unconditional model
+but $p(G)$ is a root node so $X_{p(G)}$ is constant, that exactly
+the same analysis holds and $\boldu_G$ is a direction of constancy
+of the log likelihood.
+
+It follows that if we are fitting an unconditional model and $p(G)$
+is not a root node that
+the vector $\boldv_G$ having components $v_{G, j}$ defined by
+$$
+   v_{G, j} = \begin{cases} 1, & j \in G \\
+   - 1, & j = p(G) \\ 0, & \text{otherwise} \end{cases}
+$$
+is a direction of constancy of the log likelihood, because
+$$
+   \inner{ \boldX, \boldvarphi + s \boldv_G }
+   =
+   \inner{ \boldX, \boldvarphi }
+$$
+for any scalar $s$.
+
+We should perhaps explain for those not familiar with the terminology
+that a \emph{direction of constancy} of a log likelihood $l$ is a vector
+$\boldu$ such that $l(\boldtheta + s \boldu) = l(\boldtheta)$ for all
+$s$, just the situation we have in both cases above.
+Because the log likelihood of an exponential is strictly concave,
+a direction of constancy is the only form of non-identifiability an
+exponential family can have (which is why we use the concept here).
+
+To unify our treatment of the cases let $\boldw_G$ be the direction of
+constancy, either $\boldu_G$ or $\boldv_G$ as the case may be.  If the model
+matrix is $\boldM$, then we have non-identifiability if and only if
+$\boldw_G$ is in the column space of $\boldM$.  This follows from the
+fact that the Fisher information matrix $\boldI(\boldeta)$ has a null
+eigenvector
+$\boldw$ if and only if $\boldw$ is a direction of constancy and
+the assumption that $\boldM$ has full rank, and that
+$\boldM^T \boldI(\boldeta) \boldM$ is the Fisher information for
+$\boldbeta$.
+(We concede this is not the way to write up a proof, but this is not
+a theory paper.  We should write this up properly somewhere.)
+
+However, it seems from this analysis that the following algorithm
+fixes the nonidentifiability problem.
+\begin{itemize}
+\item Add $\boldw_G$ as a column of $\boldM$.  If there are multiple
+    multinomial chain groups, add the $\boldw_G$ for each of them.
+\item Drop just enough columns of $\boldM$ to obtain a matrix
+    of full rank, dropping none of the added $\boldw_G$.
+\item Then drop all of the added $\boldw_G$.
+\end{itemize}
+The resulting model matrix $\boldM$ is a maximal submatrix of the original
+$\boldM$ having the same row dimension subject to the conditions of (1)
+being full rank and (2) having no $\boldw_G$ in its column space.
+
+All versions of the aster package already drop columns of the model matrix
+provided by the R function \verb@model.matrix@ or by the user, which is not
+always full rank.
+This code is in \verb@aster.default@ so it works no matter how the model
+matrix is provided.  It uses the LINPACK QR decomposition routines, which
+provide rank estimation and some information about redundant columns in
+the pivoting information.  This is not ideal.  The exact arithmetic stuff
+in the \verb@rcdd@ package would do a perfect job, but we need to first
+upgrade the \verb@rcdd@ package to provide an interface to redundancy
+elimination and second fix the inability of \verb@cddlib@ to compile
+on Microsoft.  But for the purposes of this section, how we do redundancy
+elimination is irrelevant.  The point is that the aster package already
+must do redundancy elimination.  This doesn't make the situation any worse
+than it already is.  We merely have to add some additional redundancy to
+be eliminated.
+
+\subsection{Identifiability for Two-Parameter Normal and Gamma}
+
+As is obvious, a two-parameter model is not identifiable when the sample
+size is one.  Thus we expect that the two-parameter normal and gamma models,
+items (i) and (j) on our model lists, are identifiable in the vast majority
+of applications, they need not be.
+Note that one chain group $G$ with $X_{p(G)} = 1$ need not be a problem
+so long as there is more than one such group and the model matrix is sensible.
+An aster model in which every chain component is two-parameter normal and
+$p(G) = 1$ for all $G$ generalizes ordinary least squares
+regression.  If our model matrix is of the form
+$$
+   \begin{pmatrix} \boldM & \boldzero \\ \boldzero & \boldI \end{pmatrix}
+$$
+where $\boldM$ is the what is usually thought of as the model matrix for
+regression, the upper block is for all of the first components of the
+chain groups ($\theta_1 = \mu / \sigma^2$, the lower block is for
+all of the second components ($\theta_2 = - 1 / 2 \sigma^2$), and $\boldI$
+is the identity matrix, so we homoscedasticity, then everything is the
+same as in ordinary regression except that we take no account of error
+degrees of freedom ($z$-tests rather than $t$-tests, $\chi^2$-tests rather
+than $F$-tests) and use the MLE for $\hat{\sigma}^2$ dividing by $n$ (the
+number of chain components) rather than error degrees of freedom.
+
+I don't think the \verb@lm@ function in R worries about nonidentifiability
+(being unable to estimate the variance because $n = 1$).  Perhaps we should,
+but it is not a high priority.
+
+\section{Constraints} \label{sec:constrain}
+
+This is item~\ref{it:constrain} on our list.
+It was partly dealt with in Section~\ref{sec:affine} above.
+The main point of this section is to mention all of the models
+introduced between here and Section~\ref{sec:affine} above that
+have constrained parameter spaces.  All of the negative binomial models,
+which are items (b) and (c) in our model lists are one-parameter models
+with constraint $\theta < 0$.  These were mentioned
+in Section~\ref{sec:affine}.  If we allow
+\verb@list(name = "geometric")@ as an abbreviation for
+\verb@list(name = "negative.binomial", size = 1)@ as was suggested
+in Section~\ref{sec:fam-one} in the discussion of user-level descriptions
+of families, then this is, of course, being a special case of the negative
+binomial, constrained in the same way.
+
+The gamma scale family, which is item (h) in our model lists,
+is a one-parameter model with constraint $\theta > 0$.
+
+The normal location-scale family, which is item (i) in our model lists,
+is a two-parameter model with constraint $\theta_2 < 0$
+(and $\theta_1$ unconstrained).
+
+The gamma shape-scale family, which is item (j) in our model lists,
+is a two-parameter model with constraints $\theta_1 > 0$ and $\theta_2 > 0$.
+
+All of these are regular exponential families, so the constraints do
+not need to be explicitly enforced if the optimization software can
+deal with with this situation, which was also discussed
+in Section~\ref{sec:affine} above (at the end of the section,
+on p.~\pageref{pg:regular}).
+
+\section{Validity Checks} \label{sec:valid}
+
+This is item~\ref{it:valid} on our list.
+There is a bug in all versions of aster to data (or a design misfeature)
+that the validity checks for aster models are not fine-grained enough.
+The problem is hard-wired.  For an aster family as defined in
+\verb@astfam.c@ there are three functions you can call.
+One evaluates $\psi(\theta)$ or $\psi'(\theta)$, or $\psi''(\theta)$.
+Another checks data validity.
+The third simulates a realization from the model for a specified $\theta$.
+
+The particular problem we are on about here is the data validity check.
+When doing prediction of unconditional mean value parameters, we need
+a data validity check that checks whether root data only is valid
+(because the prediction is a function of root data only).
+And this we do not have.  The existing data validity check checks both
+child and parent data.  In existing versions through the CRAN version
+we just set the child data to 1 because 1 is always valid for Bernoulli,
+Poisson, or zero-truncated Poisson.  When we added two-truncated Poisson,
+this kludge gave errors (at least it gave a semi-understandable error
+rather than inexplicable crash).
+So we added an additional kludge to work around
+the lack of the needed validity check.  We really need two validity check
+functions: one that checks the parent data for validity and another
+that checks that the child data (now possibly multivariate child data
+if the family is multivariate) given the parent data.
+Note that for exponential families data validity does not depend on
+parameter values.
+
+%%% OUT OF PLACE ???
+Child data checks are not problematic.  We always had them, and we continue
+to need them.  Checks for new families that are brand name distributions
+are obvious, we just need to implement the checks when we implement
+everything else about the family.  For less familiar families, the checks
+are also obvious from the definition.  For $k$-truncated families,
+this implies $X > k$.  For the two-parameter normal we must have $X^2 > 0$.
+This does not hold automatically, the user provides
+a two-dimensional canonical statistic, the first component of which purports
+to be $X_1 + \ldots + X_n$ where $n = X_{p(G)}$ and the second component of
+which purports to be $X_1^2 + \ldots + X_n^2$.  We need to check that the
+latter is actually positive.
+We could further check that when $n = 1$ we actually have the first component
+the square of the second, or we could not bother to check.
+
+One new data validity issue is mentioned in Section~1.2 of the
+revised aster paper (submitted to \emph{Biometrika}).  If the family
+is infinitely divisible, then parent data can be any nonnegative real value.
+If the family is not infinitely divisible, then parent data can be any
+nonnegative integer value.
+The items in our model lists that are infinitely divisible are
+item (b) negative binomial,
+item (d) Poisson, item item (g) normal-location, and item (h) gamma-scale.
+
+Note that items (i) and (j), which one might think are infinitely divisible
+are not.  For both the distribution of $X$ is infinitely divisible, but
+the canonical statistics for these families, which are vectors,
+$(X, X^2)$ for one and $(X, \log X)$ for the other, do not have
+infinitely divisible distributions.  Curiously for the normal,
+both marginal distributions, for $X$ and $X^2$, are infinitely divisible,
+but the joint distribution of $(X, X^2)$ is not.
+
+No version to date had a parameter validity issue.
+All models were one-dimensional and their canonical
+parameter spaces were the whole real line.
+Now we have constraints.
+As discussed at the end of Section~\ref{sec:affine}
+(p.~\pageref{pg:regular} above) when evaluating $\psi_G$, $\nabla \psi_G$,
+and $\nabla^2 \psi_G$ all parameter values are ``valid'', even those outside
+the canonical parameter space, we merely need to return \verb@Inf@ for
+$\psi_G$ and \verb@NaN@ for components of the derivatives.
+The optimization software needs to be smart enough to deal with this
+by attempting a smaller step to some point that is in the parameter space.
+(Whether this leads to code changes other than in the function that
+evaluates the cumulant function and its derivatives, I do not know.
+Presumably no other code changes are necessary, but there may be some
+assumptions of finiteness somewhere in the code that I forgot.)
+
+The simulation function does need to check for valid parameter values
+and crash with an informative error message if not.  So perhaps we
+should provide a parameter validity check function, since we need to
+do the validity check in two different bits of code (cumulant and simulation)
+anyway.
+
+\section{Mixed Parameterization} \label{sec:mix}
+
+This is item~\ref{it:mix} on our list.
+I puzzled for a long time about whether mixed parameterizations make sense.
+Barndorff-Nielsen (\emph{Information and Exponential Families}, 1978)
+talks about mixed parameterizations in which
+some parameters are canonical and some mean-value.  That is not what I mean.
+What I mean here is when some canonical parameters are conditional
+$\theta$ and some are unconditional $\varphi$.
+
+It is in fact obvious from the discussion the ``key''
+equation of aster theory, equation (5) in the revised aster manuscript,
+that if we pick an arbitrary subset of nodes to make unconditional
+so their linear predictor is $\eta_j = \varphi_j$ given by the ``key'' equation
+and leave the rest of the nodes with $\eta_j = \theta_j$ as linear predictor,
+that if we want to find the $\boldtheta$ corresponding to a $\boldeta$ that
+so long as we solve for children before parents that this solving
+merely moves a term from one side of the ``key'' equation to the other
+for those $j$ such that $\eta_j = \varphi_j$ and otherwise does nothing.
+
+So mixed parameterizations are possible.  Whether they are worth implementing,
+whether they would be scientifically interesting for any application, I do not
+know.
+
+\section{MLE of Non-Exponential Family Parameters}
+\label{sec:non-expo}
+
+This is item~\ref{it:non-expo} on our list.
+Everything discussed above does not change the basic notion of aster models
+that all parameters are exponential family parameters.  Hyperparameters
+are not considered parameters.  They are ``assumed known.''
+
+If we wanted to maximize over a hyperparameter, the log likelihood
+calculated by \verb@mlogl@ would be of no help because we drop terms
+not containing what we consider to be the parameters (that is, the
+exponential family parameters $\boldtheta$).  Since we drop terms
+containing the hyperparameters, the log likelihood we compute is not
+the log likelihood when the hyperparameters are considered parameters.
+
+We could, as a kludge, supposing, for example, we wanted to fit the size
+parameter of a negative binomial distribution by maximum likelihood
+use the aster model machinery to fit the aster MLE for each value of
+size parameter $\alpha$ on a grid of values, then evaluate the log likelihood
+correctly (not using the aster package, using \verb@dnbinom@ and perhaps
+other functions), and then maximize this one-parameter profile.
+But ideally we should not have to kludge this.  The aster package should
+handle this too.  But that would require a lot of changes to the machinery
+and is not a high priority.
+
+People who like homoscedasticity assumptions would prefer
+the one-parameter normal location model, item (g) in our model lists,
+to the two-parameter normal model, item (i)
+in our model lists, if the hyperparameter $\sigma$ in the one-parameter
+family could participate in maximum likelihood, so that would be one reason
+to add this feature.
+
+\section{User-Specified Superfamilies} \label{sec:user}
+
+This is item~\ref{it:user} on our list.
+Now that we have the distinction between families and superfamilies,
+introduced on p.~\pageref{pg:super} above.  We can see that what we
+want to be ``user-specified'' by writing an implementation in R
+(to be called from inside the aster C implementation) is a superfamily.
+The user has the same requirements that implementers of superfamilies
+(in C) now have.  A superfamily has the following tasks
+\begin{itemize}
+\item Calculation of $\psi$, $\psi'$, and $\psi''$ for a one-parameter family
+    or $\psi$, $\nabla \psi$, and $\nabla^2 \psi$ for a multi-parameter family.
+
+    Note that for either we need all of the hyperparameter values, and for
+    the latter we also need the dimension (the cardinality of the chain
+    component).  These are provided in the function call.
+\item Data validity checks.  One function checks validity of parent data.
+    Another checks validity of both parent and child data.  (Or the same
+    function does both jobs, as in current implementations, but there is
+    a flag that says check parent data only.)
+\item Simulation.  A function that simulates one realization from the
+    conditional distribution specified by the family (hyperparameters,
+    parameters, and dimension given).
+\item The superfamily must say what the maximum and minimum values for
+    the cardinality of a chain component are:
+    both equal to one for an inherently one-parameter family,
+    both equal to two for an inherently two-parameter family,
+    two to infinity for a multinomial family.
+\item The superfamily must say what the number of hyperparameters are.
+\end{itemize}
+All of these will need to be specified by R function (for the first three)
+or by R data (for the last two).
+
+\begin{thebibliography}{}
+
+\bibitem[Geyer, Wagenius, and Shaw(2005)]{gws}
+Geyer, C.~J., Wagenius, S., and Shaw, R.~G. (2005).
+\newblock Aster models for life history analysis.
+\newblock University of Minnesota School of Statistics, Technical Report 644.
+\newblock \url{http://www.stat.umn.edu/geyer/aster/aster.pdf} submitted
+    August 2005.
+\newblock \url{http://www.stat.umn.edu/geyer/aster/aster-2a.pdf} revised
+    and resubmitted June 2006.
+
+\end{thebibliography}
+
+\end{document}
+

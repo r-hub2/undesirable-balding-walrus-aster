@@ -1,0 +1,222 @@
+
+ library(aster)
+
+ data(radish)
+
+ pred <- c(0,1,2)
+ fam <- c(1,3,2)
+
+ ### need object of type aster to find idrop below
+
+ aout <- aster(resp ~ varb + fit : (Site * Region),
+     pred, fam, varb, id, root, data = radish)
+
+ ### model matrices for fixed and random effects
+
+ modmat.fix <- model.matrix(resp ~ varb + fit : (Site * Region), data = radish)
+ modmat.blk <- model.matrix(resp ~ 0 + fit : Block, data = radish)
+ modmat.pop <- model.matrix(resp ~ 0 + fit : Pop, data = radish)
+
+ rownames(modmat.fix) <- NULL
+ rownames(modmat.blk) <- NULL
+ rownames(modmat.pop) <- NULL
+
+ idrop <- match(aout$dropped, colnames(modmat.fix))
+ idrop <- idrop[! is.na(idrop)]
+ modmat.fix <- modmat.fix[ , - idrop, drop = FALSE]
+
+ nfix <- ncol(modmat.fix)
+ nblk <- ncol(modmat.blk)
+ npop <- ncol(modmat.pop)
+
+ ### reaster
+
+ rout <- reaster(modmat.fix, list(block = modmat.blk, pop = modmat.pop),
+     pred, fam, radish$varb, radish$id, radish$root, response = radish$resp)
+## IGNORE_RDIFF_BEGIN
+ summary(rout, standard.deviation = FALSE)
+## IGNORE_RDIFF_END
+
+ ### can we figure out idrop from here ???
+ identical(colnames(modmat.fix), dimnames(rout$obj$modmat)[[3]])
+
+ ### make zwz
+
+ zwz <- makezwz(rout$sigma, c(rout$alpha, rout$c), rout$fixed, rout$random,
+     rout$obj)
+
+ # objective functions
+
+ objfun_beenu <- objfun.factory(modmat.fix,
+     list(block = modmat.blk, pop = modmat.pop),
+     radish$resp, pred, fam, radish$root, zwz = zwz,
+     standard = FALSE, deriv = 2)
+
+ objfun_ceesigma <- objfun.factory(modmat.fix,
+     list(block = modmat.blk, pop = modmat.pop),
+     radish$resp, pred, fam, radish$root, zwz = zwz,
+     standard = TRUE, deriv = 2)
+
+ alphabeenu <- as.vector(with(rout, c(alpha, b, nu)))
+ alphaceesigma <- as.vector(with(rout, c(alpha, c, sigma)))
+
+ oout_beenu <- objfun_beenu(alphabeenu)
+ oout_ceesigma <- objfun_ceesigma(alphaceesigma)
+
+ # check the former
+
+ is.alpha <- seq_along(alphabeenu) <= length(rout$alpha)
+ is.nu_or_sigma <- seq_along(alphabeenu) > length(rout$alpha) + length(rout$b)
+ is.bee_or_cee <- (! (is.alpha | is.nu_or_sigma))
+
+ alphabee <- with(rout, c(alpha, b))
+ modmat <- with(rout, Reduce(cbind, random, init = fixed))
+ moo <- mlogl(alphabee, pred, fam, radish$resp, radish$root, modmat, deriv = 2)
+ alpha <- alphabeenu[is.alpha]
+ bee <- alphabeenu[is.bee_or_cee]
+ nu <- alphabeenu[is.nu_or_sigma]
+ zwz <- rout$zwz
+
+ nrand <- sapply(rout$random, ncol)
+ dee_idx <- rep(seq_along(nrand), times = nrand)
+ dee <- nu[dee_idx]
+
+ # value of objective function, equation (4.5) in Aster Theory book
+ all.equal(oout_beenu$value, as.numeric(moo$value + sum(bee^2 / dee) / 2.0 +
+     determinant(zwz %*% diag(dee) + diag(length(dee)))$modulus / 2.0))
+ all.equal(oout_ceesigma$value, oout_beenu$value)
+
+ # gradient with respect to (alpha, b, nu)
+ # equation (4.12a) in Aster Theory book
+ all.equal(oout_beenu$gradient[is.alpha], moo$gradient[is.alpha])
+ # equation (4.12b) in Aster Theory book
+ all.equal(oout_beenu$gradient[is.bee_or_cee], moo$gradient[is.bee_or_cee]
+     + bee / dee)
+ # equation (4.12c) in Aster Theory book
+ foompter <- rep(0, length(nu))
+ for (k in seq_along(foompter)) {
+     eek <- as.numeric(dee_idx == k)
+     foompter[k] <- sum(- bee^2 / dee^2 * eek) / 2.0 +
+         sum(diag(solve(zwz %*% diag(dee) + diag(length(dee))) %*%
+             zwz %*% diag(eek))) / 2.0
+ }
+ all.equal(oout_beenu$gradient[is.nu_or_sigma], foompter)
+ # value and gradient w. r. t. (alpha, b, nu) now checked
+
+ # check symmetry of Hessians
+ isSymmetric(oout_beenu$hessian)
+ isSymmetric(oout_ceesigma$hessian)
+
+ # on to Hessian w. r. t. (alpha, bee, nu)
+ # equation (4.18a) in Aster Theory book
+ is.alpha.short <- seq_along(alphabee) <= length(alpha)
+ is.bee.short <- (! is.alpha.short)
+ all.equal(oout_beenu$hessian[is.alpha, is.alpha],
+     moo$hessian[is.alpha.short, is.alpha.short])
+ # equation (4.18b) in Aster Theory book
+ all.equal(oout_beenu$hessian[is.alpha, is.bee_or_cee],
+     moo$hessian[is.alpha.short, is.bee.short])
+ all.equal(oout_beenu$hessian[is.bee_or_cee, is.alpha],
+     moo$hessian[is.bee.short, is.alpha.short])
+ # equation (4.18c) in Aster Theory book
+ all.equal(oout_beenu$hessian[is.bee_or_cee, is.bee_or_cee],
+     moo$hessian[is.bee.short, is.bee.short] + diag(1 / dee))
+ # equation (4.18d) in Aster Theory book
+ foompter <- matrix(0, length(alpha), length(nu))
+ all.equal(oout_beenu$hessian[is.alpha, is.nu_or_sigma], foompter)
+ all.equal(oout_beenu$hessian[is.nu_or_sigma, is.alpha], t(foompter))
+ # equation (4.18e) in Aster Theory book
+ foompter <- matrix(0, length(bee), length(nu))
+ for (k in seq_along(nu)) {
+     eek <- as.numeric(dee_idx == k)
+     foompter[ , k] <- (- eek * bee / nu[k]^2)
+ }
+ all.equal(oout_beenu$hessian[is.bee_or_cee, is.nu_or_sigma], foompter)
+ all.equal(oout_beenu$hessian[is.nu_or_sigma, is.bee_or_cee], t(foompter))
+ # equation (4.18f) in Aster Theory book
+ inv <- solve(zwz %*% diag(dee) + diag(length(dee)))
+ foompter <- matrix(0, length(nu), length(nu))
+ for (k1 in seq_along(nu)) {
+     eek1 <- as.numeric(dee_idx == k1)
+     foompter[k1, k1] <- sum(bee^2 / dee^3 * eek1^2)
+     for (k2 in seq_along(nu)) {
+         eek2 <- as.numeric(dee_idx == k2)
+         foompter[k1, k2] <- foompter[k1, k2] -
+             sum(diag(inv %*% zwz %*% diag(eek1) %*%
+             inv %*% zwz %*% diag(eek2))) / 2.0
+     }
+ }
+ all.equal(oout_beenu$hessian[is.nu_or_sigma, is.nu_or_sigma], foompter)
+ # value and gradient and Hessian w. r. t. (alpha, b, nu) now checked
+
+ # gradient w. r. t. (alpha, c, sigma)
+ cee <- alphaceesigma[is.bee_or_cee]
+ sigma <- alphaceesigma[is.nu_or_sigma]
+ aaa <- sqrt(dee)
+ # equation (4.33a) in Aster Theory book
+ identical(oout_beenu$gradient[is.alpha], moo$gradient[is.alpha.short])
+ # equation (4.33b) in Aster Theory book
+ all.equal(oout_ceesigma$gradient[is.bee_or_cee],
+     aaa * moo$gradient[is.bee.short] + cee)
+ # same, but from chain rule
+ all.equal(oout_ceesigma$gradient[is.bee_or_cee],
+     oout_beenu$gradient[is.bee_or_cee] * aaa)
+ # equation (4.33c) in Aster Theory book
+ foompter <- rep(0, length(sigma))
+ for (k in seq_along(foompter)) {
+     eek <- as.numeric(dee_idx == k)
+     foompter[k] <- sum(oout_beenu$gradient[is.bee_or_cee] * cee * eek) +
+         oout_beenu$gradient[is.nu_or_sigma][k] * 2 * sigma[k]
+ }
+ all.equal(oout_ceesigma$gradient[is.nu_or_sigma], foompter)
+ # value and gradient w. r. t. (alpha, c, sigma) now checked
+
+ # Hessian w. r. t. (alpha, c, sigma)
+ # equation (4.35a) in Aster Theory book
+ identical(oout_beenu$hessian[is.alpha, is.alpha],
+     oout_ceesigma$hessian[is.alpha, is.alpha])
+ # equation (4.35b) in Aster Theory book
+ all.equal(oout_ceesigma$hessian[is.alpha, is.bee_or_cee],
+     oout_beenu$hessian[is.alpha, is.bee_or_cee] %*% diag(aaa))
+ all.equal(oout_ceesigma$hessian[is.bee_or_cee, is.alpha],
+     diag(aaa) %*% oout_beenu$hessian[is.bee_or_cee, is.alpha])
+ # equation (4.35c) in Aster Theory book
+ foompter <- matrix(0, length(alpha), length(sigma))
+ for (k in seq_along(sigma)) {
+     eek <- as.numeric(dee_idx == k)
+     foompter[ , k] <- drop(oout_beenu$hessian[is.alpha, is.bee_or_cee] %*%
+         cbind(eek * cee))
+ }
+ all.equal(oout_ceesigma$hessian[is.alpha, is.nu_or_sigma], foompter)
+ all.equal(oout_ceesigma$hessian[is.nu_or_sigma, is.alpha], t(foompter))
+ # equation (4.35d) in Aster Theory book
+ all.equal(oout_ceesigma$hessian[is.bee_or_cee, is.bee_or_cee],
+     diag(aaa) %*% moo$hessian[is.bee.short, is.bee.short] %*% diag(aaa)
+     + diag(sum(is.bee.short)))
+ # equation (4.35e) in Aster Theory book
+ foompter <- matrix(0, length(bee), length(sigma))
+ for (k in seq_along(sigma)) {
+     eek <- as.numeric(dee_idx == k)
+     moobb <- moo$hessian[is.bee.short, is.bee.short]
+     foompter[ , k] <- drop(diag(aaa) %*% moobb %*% cbind(eek * cee)) +
+         moo$gradient[is.bee.short] * eek
+ }
+ all.equal(oout_ceesigma$hessian[is.bee_or_cee, is.nu_or_sigma], foompter)
+ # equation (4.35f) in Aster Theory book
+ foompter <- matrix(0, length(sigma), length(sigma))
+ moobb <- moo$hessian[is.bee.short, is.bee.short]
+ inv <- solve(zwz %*% diag(dee) + diag(length(dee)))
+ for (j in seq_along(sigma)) {
+     eej <- as.numeric(dee_idx == j)
+     for (k in seq_along(sigma)) {
+         eek <- as.numeric(dee_idx == k)
+         foompter[j, k] <-
+             drop(rbind(eej * cee) %*% moobb %*% cbind(eek * cee)) +
+             sum(diag(inv %*% zwz %*% diag(eej) %*% diag(eek))) -
+             2.0 * sum(diag(inv %*% zwz %*% diag(eej * aaa) %*%
+                      inv %*% zwz %*% diag(eek * aaa)))
+     }
+ }
+ all.equal(oout_ceesigma$hessian[is.nu_or_sigma, is.nu_or_sigma], foompter)
+ # everything checks
+
